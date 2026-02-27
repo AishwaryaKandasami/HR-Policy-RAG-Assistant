@@ -32,4 +32,4 @@ python-dotenv==1.0.1
 
 # Utilities (transitive but pinned for stability)
 tiktoken==0.8.0
-numpy==1.26.4
+numpy>=2.1.0,<3.0.0
