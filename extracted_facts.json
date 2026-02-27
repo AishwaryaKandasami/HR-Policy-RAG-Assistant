@@ -529,14 +529,20 @@
         "facts": [
             {
                 "topic": "statement_download",
-                "fact": "Investors can request a Consolidated Account Statement (CAS) online through CAMS, which provides updated mutual fund account statements across all fund houses serviced by CAMS.",
-                "verbatim_snippet": "Request your consolidated account statement online with CAMS. Get updated mutual fund account statements easily and securely.",
+                "fact": "To download a capital gains statement from CAMS visit camsonline.com, select Consolidated Account Statement, enter your PAN and registered email address, select the financial year, and the statement is delivered to your registered email.",
+                "verbatim_snippet": "Request your consolidated account statement online with CAMS",
                 "plan": "N/A"
             },
             {
                 "topic": "statement_download",
-                "fact": "To request a CAS from CAMS, users must provide their registered email, PAN (optional), select the statement type (Summary or Detailed) and 'As on' date, and set a password for file encryption.",
-                "verbatim_snippet": "Enter the email ID registered in your folio, PAN, select statement type and period",
+                "fact": "The CAMS Consolidated Account Statement covers all mutual fund transactions across AMCs serviced by CAMS and can be used for capital gains calculation and tax filing.",
+                "verbatim_snippet": "Get updated mutual fund account statements easily and securely",
+                "plan": "N/A"
+            },
+            {
+                "topic": "statement_download",
+                "fact": "Investors can download their mutual fund account statement or capital gains report online through CAMS without visiting a branch \u2014 only PAN and registered email address are required.",
+                "verbatim_snippet": "Request your consolidated account statement online with CAMS",
                 "plan": "N/A"
             }
         ]

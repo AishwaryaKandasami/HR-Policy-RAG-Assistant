@@ -8,9 +8,15 @@ Purpose : Given a user query and retrieved context chunks, call
 Inputs  : User query + list of retrieved chunk dicts from retriever.py
 Outputs : Dict with answer, source_url, source_label, date_fetched, intent
 Env vars: GROQ_API_KEY
+
+Patches applied:
+  P1 — Context delimiters: wraps context in <context> tags
+  P4 — Programmatic source/date: strips LLM lines, appends from metadata
 """
 
 import os
+import re
+import pathlib
 
 from dotenv import load_dotenv
 from groq import Groq
@@ -22,19 +28,21 @@ TEMPERATURE       = 0.0      # factual — no creativity
 MAX_TOKENS        = 200
 TOP_P             = 1.0
 
-# ── System prompt — pasted verbatim per spec ──────────────────────
-SYSTEM_PROMPT = """You are a factual assistant for SBI Mutual Fund schemes.
-Answer using ONLY the context provided below.
-Rules:
-- Maximum 3 sentences. Never exceed this.
-- Never give investment advice or compare fund performance.
-- Never recommend buying, selling, or switching funds.
-- End every answer with: Source: [url from context]
-- End every answer with: Last updated: [date_fetched from context]
-- If context does not contain the answer respond with exactly:
-  "I don't have verified information on this. Please visit sbimf.com or amfiindia.com for the most current details."
-- Never use bullet points. Plain prose only.
-- Do not start your answer with "I"."""
+# ── System prompt — loaded from system_prompt.txt ─────────────────
+_PROMPT_PATH = pathlib.Path(__file__).parent / "system_prompt.txt"
+
+def _load_system_prompt() -> str:
+    """Read system_prompt.txt once; fall back to inline if missing."""
+    if _PROMPT_PATH.exists():
+        return _PROMPT_PATH.read_text(encoding="utf-8").strip()
+    # Minimal inline fallback (should never be reached in prod)
+    return (
+        "You are a factual assistant for SBI Mutual Fund schemes. "
+        "Answer using ONLY facts inside the <context> tags. "
+        "Maximum 3 sentences. Plain prose only."
+    )
+
+SYSTEM_PROMPT = _load_system_prompt()
 
 # Fallback answer used when no context is available
 NO_CONTEXT_ANSWER = (
@@ -48,12 +56,13 @@ _groq_client: Groq | None = None
 
 # ── Initialisation ────────────────────────────────────────────────
 
-def _get_groq() -> Groq:
+def _get_groq(api_key: str | None = None) -> Groq:
     """Return (and cache) a Groq client."""
     global _groq_client
     if _groq_client is None:
-        load_dotenv()
-        api_key = os.getenv("GROQ_API_KEY")
+        if not api_key:
+            load_dotenv()
+            api_key = os.getenv("GROQ_API_KEY")
         if not api_key:
             raise EnvironmentError("GROQ_API_KEY is not set.")
         _groq_client = Groq(api_key=api_key)
@@ -62,7 +71,7 @@ def _get_groq() -> Groq:
 
 # ── Core generation function ─────────────────────────────────────
 
-def generate(query: str, retrieved_chunks: list[dict]) -> dict:
+def generate(query: str, retrieved_chunks: list[dict], api_key: str | None = None) -> dict:
     """Generate a factual answer using Groq (Llama 3.1 8B).
 
     Args:
@@ -112,21 +121,14 @@ def generate(query: str, retrieved_chunks: list[dict]) -> dict:
 
     context_body = "\n\n".join(context_parts)
 
-    # Append source + date for the LLM to quote
-    context_string = (
-        f"{context_body}\n\n"
-        f"Source URL: {best_source_url}\n"
-        f"Last updated: {best_date}"
-    )
-
-    # ── Build user prompt ────────────────────────────────────────
+    # ── Build user prompt — Patch 1: wrap in <context> tags ──────
     user_prompt = (
-        f"Context:\n{context_string}\n\n"
+        f"<context>\n{context_body}\n</context>\n\n"
         f"Question: {query}"
     )
 
     # ── Call Groq API ────────────────────────────────────────────
-    client = _get_groq()
+    client = _get_groq(api_key)
 
     chat_response = client.chat.completions.create(
         model=GROQ_MODEL,
@@ -139,18 +141,41 @@ def generate(query: str, retrieved_chunks: list[dict]) -> dict:
         top_p=TOP_P,
     )
 
-    answer_text = chat_response.choices[0].message.content.strip()
+    raw_answer = chat_response.choices[0].message.content.strip()
+
+    # ── Patch 4: strip any Source / Last updated lines the LLM
+    #    may have generated, then append programmatically ──────────
+    clean_answer = _strip_source_lines(raw_answer)
+
+    final_answer = (
+        f"{clean_answer}\n\n"
+        f"Source: {best_source_url}\n"
+        f"Last updated from sources: {best_date}"
+    )
 
     # ── Derive a readable source label ───────────────────────────
     source_label = _make_source_label(best_source_url)
 
     return {
-        "answer":       answer_text,
+        "answer":       final_answer,
         "source_url":   best_source_url,
         "source_label": source_label,
         "date_fetched": best_date,
         "intent":       "factual",
     }
+
+
+# ── Patch 4 helper ───────────────────────────────────────────────
+
+_SOURCE_LINE_RE = re.compile(
+    r"\n*(?:Source|Last updated)[^\n]*",
+    re.IGNORECASE,
+)
+
+def _strip_source_lines(text: str) -> str:
+    """Remove any Source: or Last updated: lines the LLM generated."""
+    cleaned = _SOURCE_LINE_RE.sub("", text).strip()
+    return cleaned if cleaned else text.strip()
 
 
 def _make_source_label(url: str) -> str:

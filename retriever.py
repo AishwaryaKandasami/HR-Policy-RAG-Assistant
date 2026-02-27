@@ -42,12 +42,13 @@ _reranker: CrossEncoder | None = None
 
 # ── Initialisation ────────────────────────────────────────────────
 
-def _get_openai() -> OpenAI:
+def _get_openai(api_key: str | None = None) -> OpenAI:
     """Return (and cache) an OpenAI client."""
     global _openai_client
     if _openai_client is None:
-        load_dotenv()
-        api_key = os.getenv("OPENAI_API_KEY")
+        if not api_key:
+            load_dotenv()
+            api_key = os.getenv("OPENAI_API_KEY")
         if not api_key:
             raise EnvironmentError("OPENAI_API_KEY is not set.")
         _openai_client = OpenAI(api_key=api_key)
@@ -135,6 +136,7 @@ def retrieve(
     scheme_filter: str | None = None,
     topic_filter: str | None = None,
     top_k: int = 5,
+    api_key: str | None = None,
 ) -> list[dict]:
     """Retrieve the most relevant knowledge-base chunks for a query.
 
@@ -148,13 +150,14 @@ def retrieve(
                        lock_in, riskometer, benchmark,
                        statement_download, scheme_category.
         top_k:         Number of ANN results to fetch before reranking.
+        api_key:       Optional OpenAI API key.
 
     Returns:
         List of dicts (max 3 after reranking), each containing:
         chunk_text, source_url, scheme, topic, date_fetched,
         rerank_score.
     """
-    openai_client = _get_openai()
+    openai_client = _get_openai(api_key)
     qdrant_client = _get_qdrant()
     reranker      = _get_reranker()
 
@@ -179,15 +182,16 @@ def retrieve(
 
     search_filter = Filter(must=conditions) if conditions else None
 
-    # ── Step 4: ANN search ───────────────────────────────────────
-    results = qdrant_client.search(
+    # ── Step 4: ANN search (qdrant-client ≥1.12 API) ───────────────
+    query_response = qdrant_client.query_points(
         collection_name=COLLECTION_NAME,
-        query_vector=query_vector,
+        query=query_vector,
         query_filter=search_filter,
         limit=top_k,
         with_payload=True,
     )
 
+    results = query_response.points
     if not results:
         return []
 

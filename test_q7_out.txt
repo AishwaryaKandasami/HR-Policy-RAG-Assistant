@@ -1,0 +1,50 @@
+﻿ΓöüΓöüΓöüΓöüΓöüΓöüΓöüΓöüΓöüΓöüΓöüΓöüΓöüΓöüΓöüΓöüΓöüΓöüΓöüΓöüΓöüΓöüΓöüΓöüΓöüΓöüΓöüΓöüΓöüΓöüΓöüΓöüΓöüΓöüΓöüΓöüΓöüΓöüΓöüΓöüΓöüΓöüΓöüΓöüΓöüΓöüΓöüΓöüΓöüΓöüΓöü
+TASK 3 ΓÇö RE-TEST QUERY 7 ONLY
+ΓöüΓöüΓöüΓöüΓöüΓöüΓöüΓöüΓöüΓöüΓöüΓöüΓöüΓöüΓöüΓöüΓöüΓöüΓöüΓöüΓöüΓöüΓöüΓöüΓöüΓöüΓöüΓöüΓöüΓöüΓöüΓöüΓöüΓöüΓöüΓöüΓöüΓöüΓöüΓöüΓöüΓöüΓöüΓöüΓöüΓöüΓöüΓöüΓöüΓöüΓöü
+Query: "How do I download my capital gains statement from CAMS?"
+
+Step 1 ΓÇö Guardrails
+  Intent: factual
+  Action: retrieve
+  Reason: Query is a factual question within scope.
+
+Step 2 ΓÇö Retrieval
+  Expected top chunks after KB update:
+  Chunk 1: topic=statement_download score=[9.9266]
+           text=[To download a capital gains statement from CAMS visit camsonline.com, select Consolidated Account St]
+  Chunk 2: topic=statement_download score=[7.4223]
+           text=[Investors can download their mutual fund account statement or capital gains report online through CA]
+  Chunk 3: topic=statement_download score=[1.1978]
+           text=[The CAMS Consolidated Account Statement covers all mutual fund transactions across AMCs serviced by ]
+
+  Retrieval health check:
+  - Top chunk topic matches query topic: [yes]
+  - All scores positive: [yes]
+  - No negative scores in top 3: [yes]
+
+Step 3 ΓÇö Generation
+  Answer: To download a capital gains statement from CAMS, visit camsonline.com, select Consolidated Account Statement, enter your PAN and registered email address, select the financial year, and the statement is delivered to your registered email. The CAMS Consolidated Account Statement covers all mutual fund transactions across AMCs serviced by CAMS and can be used for capital gains calculation and tax filing. Investors can download their mutual fund account statement or capital gains report online through CAMS without visiting a branch.
+
+Source: https://www.camsonline.com/Investors/Statements/Consolidated-Account-Statement
+Last updated from sources: 2026-02-26
+  Source: CAMS Online
+  Last updated: 2026-02-26
+
+Step 4 ΓÇö Score
+  Factual accuracy:     [2]
+  Citation correct:     [2]
+  Within 3 sentences:   [2]
+  Refusal if needed:    N/A (2)
+  No PII reflected:     N/A (2)
+  Query score:          [x/10]
+
+ΓöüΓöüΓöüΓöüΓöüΓöüΓöüΓöüΓöüΓöüΓöüΓöüΓöüΓöüΓöüΓöüΓöüΓöüΓöüΓöüΓöüΓöüΓöüΓöüΓöüΓöüΓöüΓöüΓöüΓöüΓöüΓöüΓöüΓöüΓöüΓöüΓöüΓöüΓöüΓöüΓöüΓöüΓöüΓöüΓöüΓöüΓöüΓöüΓöüΓöüΓöü
+FINAL OUTPUT
+ΓöüΓöüΓöüΓöüΓöüΓöüΓöüΓöüΓöüΓöüΓöüΓöüΓöüΓöüΓöüΓöüΓöüΓöüΓöüΓöüΓöüΓöüΓöüΓöüΓöüΓöüΓöüΓöüΓöüΓöüΓöüΓöüΓöüΓöüΓöüΓöüΓöüΓöüΓöüΓöüΓöüΓöüΓöüΓöüΓöüΓöüΓöüΓöüΓöüΓöüΓöü
+UPDATED PIPELINE SCORE
+Previous score:  98/100
+Query 7 score:   [x/10]
+Updated total:   [98/100]
+
+GO / NO-GO FOR STREAMLIT UI
+<100   -> List exactly what still needs fixing

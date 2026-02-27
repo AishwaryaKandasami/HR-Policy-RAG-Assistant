@@ -258,14 +258,12 @@
 
 ---
 
-## General · Statement Download (CAMS CAS)
-
-**Fact:** Investors can request a Consolidated Account Statement (CAS) online through CAMS at camsonline.com. To request a CAS, users must provide their registered email, PAN (optional), select the statement type (Summary or Detailed) and the 'As on' date, and set a password for file encryption. The statement is delivered to the registered email.
-
+## General - statement_download
+**Fact:** To download a capital gains statement or Consolidated Account Statement (CAS) from CAMS, visit camsonline.com, select Consolidated Account Statement, enter PAN and registered email address, select the financial year, and the statement is delivered to your email. No branch visit is required.
 **Plan coverage:** N/A
 **Source:** https://www.camsonline.com/Investors/Statements/Consolidated-Account-Statement
 **Last updated:** 2026-02-26
-**Keywords:** CAS download, consolidated account statement, CAMS statement, mutual fund statement, account statement, how to get statement, portfolio statement, PAN, email statement
+**Keywords:** capital gains statement, CAS download, CAMS statement, account statement download, tax statement, mutual fund statement, download statement, capital gains report, tax filing statement, consolidated account statement
 
 ---
 
