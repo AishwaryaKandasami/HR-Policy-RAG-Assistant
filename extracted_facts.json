@@ -6,14 +6,14 @@
         "facts": [
             {
                 "topic": "expense_ratio",
-                "fact": "The Total Expense Ratio for SBI Large Cap Fund Regular Plan is 1.48% and Direct Plan is 0.80%, as on 31 Jan 2026.",
-                "verbatim_snippet": "Expense Ratio Regular in % (as on 31 Jan ,2026) : 1.48",
+                "fact": "The Total Expense Ratio for SBI Large Cap Fund Regular Plan is 1.48% and Direct Plan is 0.80%, as on 28 Feb 2026.",
+                "verbatim_snippet": "Expense Ratio Regular in % (as on 28 Feb ,2026) : 1.48",
                 "plan": "Regular"
             },
             {
                 "topic": "expense_ratio",
-                "fact": "The Total Expense Ratio for SBI Large Cap Fund Direct Plan is 0.80%, as on 31 Jan 2026.",
-                "verbatim_snippet": "Expense Ratio Direct in % (as on 31 Jan ,2026) : 0.8",
+                "fact": "The Total Expense Ratio for SBI Large Cap Fund Direct Plan is 0.80%, as on 28 Feb 2026.",
+                "verbatim_snippet": "Expense Ratio Direct in % (as on 28 Feb ,2026) : 0.8",
                 "plan": "Direct"
             },
             {
@@ -55,14 +55,14 @@
         "facts": [
             {
                 "topic": "expense_ratio",
-                "fact": "The Total Expense Ratio for SBI Flexicap Fund Regular Plan is 1.66%, as on 31 Jan 2026.",
-                "verbatim_snippet": "Expense Ratio Regular in % (as on 31 Jan ,2026) : 1.66",
+                "fact": "The Total Expense Ratio for SBI Flexicap Fund Regular Plan is 1.66%, as on 28 Feb 2026.",
+                "verbatim_snippet": "Expense Ratio Regular in % (as on 28 Feb ,2026) : 1.66",
                 "plan": "Regular"
             },
             {
                 "topic": "expense_ratio",
-                "fact": "The Total Expense Ratio for SBI Flexicap Fund Direct Plan is 0.83%, as on 31 Jan 2026.",
-                "verbatim_snippet": "Expense Ratio Direct in % (as on 31 Jan ,2026) : 0.83",
+                "fact": "The Total Expense Ratio for SBI Flexicap Fund Direct Plan is 0.83%, as on 28 Feb 2026.",
+                "verbatim_snippet": "Expense Ratio Direct in % (as on 28 Feb ,2026) : 0.83",
                 "plan": "Direct"
             },
             {
@@ -104,14 +104,14 @@
         "facts": [
             {
                 "topic": "expense_ratio",
-                "fact": "The Total Expense Ratio for SBI ELSS Tax Saver Fund Regular Plan is 1.57%, as on 31 Jan 2026.",
-                "verbatim_snippet": "Expense Ratio Regular in % (as on 31 Jan ,2026) : 1.57",
+                "fact": "The Total Expense Ratio for SBI ELSS Tax Saver Fund Regular Plan is 1.57%, as on 28 Feb 2026.",
+                "verbatim_snippet": "Expense Ratio Regular in % (as on 28 Feb ,2026) : 1.57",
                 "plan": "Regular"
             },
             {
                 "topic": "expense_ratio",
-                "fact": "The Total Expense Ratio for SBI ELSS Tax Saver Fund Direct Plan is 0.89%, as on 31 Jan 2026.",
-                "verbatim_snippet": "Expense Ratio Direct in % (as on 31 Jan ,2026) : 0.89",
+                "fact": "The Total Expense Ratio for SBI ELSS Tax Saver Fund Direct Plan is 0.89%, as on 28 Feb 2026.",
+                "verbatim_snippet": "Expense Ratio Direct in % (as on 28 Feb ,2026) : 0.89",
                 "plan": "Direct"
             },
             {
@@ -240,7 +240,7 @@
         "facts": [
             {
                 "topic": "benchmark",
-                "fact": "The first tier benchmark for SBI Large Cap Fund is BSE 100 (TRI) as stated in the January 2026 factsheet.",
+                "fact": "The first tier benchmark for SBI Large Cap Fund is BSE 100 (TRI) as stated in the February 2026 factsheet.",
                 "verbatim_snippet": "First Tier Benchmark: BSE 100 (TRI)",
                 "plan": "Both"
             },
@@ -271,7 +271,7 @@
         "facts": [
             {
                 "topic": "benchmark",
-                "fact": "The first tier benchmark for SBI Flexicap Fund is BSE 500 (TRI) as stated in the January 2026 factsheet.",
+                "fact": "The first tier benchmark for SBI Flexicap Fund is BSE 500 (TRI) as stated in the February 2026 factsheet.",
                 "verbatim_snippet": "First Tier Benchmark: BSE 500 (TRI)",
                 "plan": "Both"
             },
@@ -302,7 +302,7 @@
         "facts": [
             {
                 "topic": "benchmark",
-                "fact": "The first tier benchmark for SBI ELSS Tax Saver Fund is BSE 500 (TRI) as stated in the January 2026 factsheet.",
+                "fact": "The first tier benchmark for SBI ELSS Tax Saver Fund is BSE 500 (TRI) as stated in the February 2026 factsheet.",
                 "verbatim_snippet": "First Tier Benchmark: BSE 500 (TRI)",
                 "plan": "Both"
             },
