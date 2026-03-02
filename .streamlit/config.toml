@@ -8,4 +8,4 @@ font = "sans serif"
 [server]
 maxUploadSize = 1
 enableCORS = false
-fileWatcherType = "poll"
+fileWatcherType = "none"
