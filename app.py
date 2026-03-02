@@ -42,7 +42,7 @@ from generator import generate
 
 @st.cache_resource(show_spinner=False)
 def initialize_backend():
-    # Load vector store from vector_store/mf_faq.json, initialize Qdrant, load cross-encoder
+    # Load vector store from vector_store/mf_faq.json (reloaded for Feb 2026 update)
     _get_qdrant()
     _get_reranker()
     return True
