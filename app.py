@@ -14,10 +14,19 @@ st.markdown(
     "div.stButton > button {"
     "  border: 1px solid #00d09c;"
     "  color: #00d09c;"
+    "  background-color: white;"
     "}"
     "div.stButton > button:hover {"
-    "  background-color: #00d09c;"
-    "  color: white;"
+    "  background-color: #e6faf5;"
+    "  color: #00d09c;"
+    "}"
+    "div.stButton > button:focus {"
+    "  box-shadow: none !important;"
+    "}"
+    "div.stButton > button.active {"
+    "  background-color: #00d09c !important;"
+    "  color: white !important;"
+    "  border: none !important;"
     "}"
     "a { color: #00d09c !important; }"
     "</style>",
@@ -68,6 +77,42 @@ st.info("ℹ️  Facts only · No investment advice · For Groww users researchi
 # SECTION 5 — Chat history
 if "messages" not in st.session_state:
     st.session_state.messages = []
+
+# SECTION 5a — Scheme Selector
+if "selected_scheme" not in st.session_state:
+    st.session_state.selected_scheme = "All Schemes"
+
+st.markdown("<p style='font-size: 12px; color: gray; margin-bottom: 5px;'>Asking about:</p>", unsafe_allow_html=True)
+
+# Layout for the 4 buttons
+cols = st.columns(4)
+schemes = ["All Schemes", "SBI Large Cap", "SBI Flexi Cap", "SBI ELSS"]
+
+for i, scheme in enumerate(schemes):
+    with cols[i]:
+        # Determine if this button is the active one
+        is_active = st.session_state.selected_scheme == scheme
+        
+        # Streamlit doesn't support dynamic classes on buttons natively.
+        # However, we can use a trick with markdown + HTML for identical styling, 
+        # or use standard st.button and rely on rerun to re-render.
+        # Since the user requested CSS overriding, we will inject a dynamic style block 
+        # specifically for the nth-child button if it's active.
+        
+        if is_active:
+            st.markdown(
+                f"<style>div[data-testid='column']:nth-of-type({i+1}) div.stButton > button {{ background-color: #00d09c !important; color: white !important; border: none !important; }}</style>",
+                unsafe_allow_html=True
+            )
+            
+        if st.button(scheme, key=f"btn_{scheme}", use_container_width=True):
+            st.session_state.selected_scheme = scheme
+            st.rerun()
+
+if st.session_state.selected_scheme != "All Schemes":
+    st.markdown(f"<p style='font-size: 12px; color: gray;'>Showing results for {st.session_state.selected_scheme} only. Select All Schemes to search across all funds.</p>", unsafe_allow_html=True)
+else:
+    st.markdown("<p style='margin-bottom: 20px;'></p>", unsafe_allow_html=True)
 
 # Welcome message if no chat history
 if len(st.session_state.messages) == 0:
@@ -125,7 +170,14 @@ if user_input:
                 action = classification.get("action")
 
                 if action == "retrieve":
-                    chunks = retrieve(user_input, api_key=OPENAI_API_KEY)
+                    if st.session_state.selected_scheme == "All Schemes":
+                        chunks = retrieve(user_input, api_key=OPENAI_API_KEY, scheme_filter=None)
+                    else:
+                        chunks = retrieve(
+                            user_input,
+                            api_key=OPENAI_API_KEY,
+                            scheme_filter=st.session_state.selected_scheme
+                        )
                     result = generate(user_input, chunks, api_key=GROQ_API_KEY)
                     
                     answer = result["answer"]
