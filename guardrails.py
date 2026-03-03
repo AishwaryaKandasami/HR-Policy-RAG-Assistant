@@ -115,31 +115,43 @@ _INJECTION_RE = re.compile(
 # ── Opinion / Advisory Patterns ──────────────────────────────────
 
 _OPINION_PHRASES = [
-    "should i",
-    "is it good", "is it bad", "is it safe", "is it worth",
+    "should i", "is it good", "recommend",
+    "is it bad", "is it safe", "is it worth",
     "will it", "will the",
     "better fund", "best fund", "better scheme", "best scheme",
-    "recommend", "suggestion", "suggest me",
+    "suggestion", "suggest me",
     "higher returns", "outperform", "underperform",
-    "worth investing", "good time to",
+    "worth investing", "good time to", "good time to invest",
     "buy or sell", "invest or redeem", "hold or sell",
-    "which is better", "which fund should",
+    "which is better", "which fund should", "which is better to invest",
     "predict", "prediction", "forecast",
     "future nav", "future price", "market prediction",
     "guaranteed returns", "assured returns",
     "how much will i earn", "how much return",
     "can i get", "will i get",
-    "can i invest",
+    "can i invest", "can i buy", "should i buy", "is it worth investing",
+    "worth buying", "right time to", "can i put money", "is it safe to invest",
+    "can i start investing", "is it good to invest", "can i purchase",
+    "how should i invest", "where should i invest", "is it advisable",
     # Patch 5 — boundary-straddling phrases
     "is that high", "is that low", "is it cheap",
     "is this better than", "should i be worried",
     "should i worry", "is it too high", "is it too low",
     "does it matter", "is it okay", "is it fine",
     "is it reasonable", "is it normal",
+    "is it safe", "is it right", "is this right", "is now a good",
+    "good for me", "right for me", "suit me", "suitable for me"
 ]
 
 _OPINION_RE = re.compile(
     r"\b(?:" + "|".join(re.escape(p) for p in _OPINION_PHRASES) + r")",
+    re.IGNORECASE,
+)
+
+# A second regex to capture "can i" followed by invest/buy/purchase
+# without requiring them to be perfectly adjacent.
+_CAN_I_INVEST_RE = re.compile(
+    r"\bcan\s+i\b.*\b(invest|buy|purchase)\b",
     re.IGNORECASE,
 )
 
@@ -185,6 +197,13 @@ def _is_opinionated(query: str) -> str | None:
         return (
             f"Query appears to seek investment advice "
             f"(matched: '{match.group()}')."
+        )
+        
+    can_i_match = _CAN_I_INVEST_RE.search(query)
+    if can_i_match:
+        return (
+            f"Query appears to seek investment advice "
+            f"(matched pattern 'can i ... {can_i_match.group(1)}')."
         )
     return None
 
@@ -425,6 +444,28 @@ if __name__ == "__main__":
     _test(
         "BOUNDARY-2: Worried phrasing",
         "SBI ELSS has 3 year lock-in, should I be worried?",
+        "opinionated", "refuse_advice",
+    )
+
+    # ── Patch 6: Complex Investment Intent (4) ───────────────────
+    _test(
+        "INTENT-1: Can I ... Invest",
+        "Can I currently invest in SBI ELSS?",
+        "opinionated", "refuse_advice",
+    )
+    _test(
+        "INTENT-2: Boundary Is It Right",
+        "Is this right for me to invest in Flexible Cap?",
+        "opinionated", "refuse_advice",
+    )
+    _test(
+        "INTENT-3: Good time to",
+        "Is it a good time to invest in SBI Large Cap?",
+        "opinionated", "refuse_advice",
+    )
+    _test(
+        "INTENT-4: Suit me",
+        "Will the Large Cap suit me?",
         "opinionated", "refuse_advice",
     )
 
