@@ -1,0 +1,164 @@
+"""
+generator.py — HR Multi-LLM Router
+====================================
+Routes RAG queries to the user-selected LLM provider:
+  1. Groq (Llama 3.1/3.3) — fastest, best for demo
+  2. Google AI Studio (Gemini 2.0 Flash) — strong reasoning
+  3. OpenAI (GPT-3.5/4o-mini) — benchmark standard
+
+Includes:
+  - System prompt loading
+  - Context window formatting
+  - Citation enforcement
+"""
+
+import os
+from typing import Optional
+
+import google.generativeai as genai
+from groq import Groq
+from openai import OpenAI
+
+# ── Config ────────────────────────────────────────────────────────
+SYSTEM_PROMPT_PATH = os.path.join(os.path.dirname(__file__), "hr_system_prompt.txt")
+
+# Standard model aliases from the UI to provider-specific IDs
+MODEL_MAP = {
+    "groq_llama_8b":   {"provider": "groq",   "id": "llama-3.1-8b-instant"},
+    "groq_llama_70b":  {"provider": "groq",   "id": "llama-3.3-70b-versatile"},
+    "gemini_flash":    {"provider": "gemini", "id": "gemini-2.0-flash"},
+    "openai_gpt35":    {"provider": "openai", "id": "gpt-3.5-turbo"},
+    "openai_gpt4o":    {"provider": "openai", "id": "gpt-4o-mini"},
+}
+
+
+def _load_system_prompt() -> str:
+    """Read the HR specialist persona and citation rules."""
+    try:
+        with open(SYSTEM_PROMPT_PATH, "r", encoding="utf-8") as f:
+            return f.read()
+    except FileNotFoundError:
+        return "You are a professional HR assistant. Use provided context and cite sources."
+
+
+def _format_context(retrieved_chunks: list[dict]) -> str:
+    """Format retrieval chunks into a readable numbered block for the LLM."""
+    if not retrieved_chunks:
+        return "No relevant HR policies found in current documents."
+
+    lines = []
+    for idx, chunk in enumerate(retrieved_chunks, start=1):
+        md = chunk.get("metadata", {})
+        header = (
+            f"--- [Doc {idx}: {md.get('doc_title', 'Unknown')} | "
+            f"Section: {md.get('section_heading', 'General')} | "
+            f"Page: {md.get('page_number', 'N/A')}] ---"
+        )
+        lines.append(header)
+        lines.append(chunk["text"])
+        lines.append("")  # separator
+    return "\n".join(lines)
+
+
+# ── Provider Clients ───────────────────────────────────────────────
+
+def _call_groq(model_id: str, api_key: str, system_msg: str, user_msg: str) -> str:
+    client = Groq(api_key=api_key)
+    chat_completion = client.chat.completions.create(
+        messages=[
+            {"role": "system", "content": system_msg},
+            {"role": "user", "content": user_msg},
+        ],
+        model=model_id,
+        temperature=0.1,  # Keep it grounded
+        max_tokens=1024,
+    )
+    return chat_completion.choices[0].message.content
+
+
+def _call_openai(model_id: str, api_key: str, system_msg: str, user_msg: str) -> str:
+    client = OpenAI(api_key=api_key)
+    response = client.chat.completions.create(
+        model=model_id,
+        messages=[
+            {"role": "system", "content": system_msg},
+            {"role": "user", "content": user_msg},
+        ],
+        temperature=0.1,
+    )
+    return response.choices[0].message.content
+
+
+def _call_gemini(model_id: str, api_key: str, system_msg: str, user_msg: str) -> str:
+    genai.configure(api_key=api_key)
+    model = genai.GenerativeModel(
+        model_name=model_id,
+        system_instruction=system_msg
+    )
+    response = model.generate_content(user_msg)
+    return response.text
+
+
+# ── Public API ─────────────────────────────────────────────────────
+
+def generate_answer(
+    query: str,
+    retrieved_chunks: list[dict],
+    model_alias: str = "groq_llama_8b",
+    api_key: Optional[str] = None
+) -> dict:
+    """
+    Main entry point for generating an HR policy answer.
+    """
+    if not api_key:
+        # Check environment as fallback (useful for pre-load and tests)
+        env_keys = {
+            "groq":   os.getenv("GROQ_API_KEY"),
+            "openai": os.getenv("OPENAI_API_KEY"),
+            "gemini": os.getenv("GOOGLE_API_KEY"),
+        }
+        # Match alias to provider then find key
+        provider_name = MODEL_MAP.get(model_alias, {}).get("provider")
+        api_key = env_keys.get(provider_name)
+
+    if not api_key:
+        return {
+            "answer": "Error: Missing API key for the selected provider.",
+            "success": False
+        }
+
+    # 1. Format inputs
+    system_msg = _load_system_prompt()
+    context_block = _format_context(retrieved_chunks)
+    user_msg = (
+        f"CONTEXT FROM HR DOCUMENTS:\n{context_block}\n\n"
+        f"USER QUESTION: {query}\n\n"
+        f"INSTRUCTIONS: Answer the user's question using the provided context only. "
+        f"Cite your sources precisely in [Source: Title, Section, Page] format."
+    )
+
+    # 2. Route to provider
+    config = MODEL_MAP.get(model_alias, MODEL_MAP["groq_llama_8b"])
+    provider = config["provider"]
+    model_id = config["id"]
+
+    try:
+        if provider == "groq":
+            answer = _call_groq(model_id, api_key, system_msg, user_msg)
+        elif provider == "openai":
+            answer = _call_openai(model_id, api_key, system_msg, user_msg)
+        elif provider == "gemini":
+            answer = _call_gemini(model_id, api_key, system_msg, user_msg)
+        else:
+            return {"answer": f"Unknown provider: {provider}", "success": False}
+
+        return {
+            "answer": answer.strip(),
+            "model_used": model_id,
+            "success": True
+        }
+    except Exception as e:
+        return {
+            "answer": f"Generation Error ({provider}): {str(e)}",
+            "success": False
+        }

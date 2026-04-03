@@ -1,0 +1,37 @@
+# HR Policy Q&A Bot — Backend Dependencies
+# Last updated: 2026-04-02
+
+# ── API server ─────────────────────────────────────────────────────
+fastapi>=0.115.0
+uvicorn>=0.32.0
+python-multipart>=0.0.9          # required for File/Form uploads in FastAPI
+
+# ── Document parsing ───────────────────────────────────────────────
+pdfplumber>=0.11.6               # text-based PDF extraction
+python-docx>=1.1.0               # DOCX (Word) extraction
+
+# ── Text splitting ─────────────────────────────────────────────────
+langchain-text-splitters>=0.3.0  # RecursiveCharacterTextSplitter
+
+# ── Embeddings ─────────────────────────────────────────────────────
+openai>=1.63.2                   # text-embedding-3-small (768-d)
+
+# ── Vector database ────────────────────────────────────────────────
+qdrant-client>=1.13.3            # in-memory Qdrant (no server needed)
+
+# ── Sparse search ──────────────────────────────────────────────────
+rank-bm25>=0.2.2                 # BM25Okapi keyword index
+
+# ── Cross-encoder reranker (used from Phase 2) ─────────────────────
+sentence-transformers>=3.4.1     # cross-encoder/ms-marco-MiniLM-L-6-v2
+
+# ── LLM clients (used from Phase 2) ───────────────────────────────
+groq>=0.18.0                     # Groq API (Llama 3.1 8B / 3.3 70B)
+google-generativeai>=0.8.0       # Gemini Flash 2.0
+
+# ── Environment ────────────────────────────────────────────────────
+python-dotenv>=1.0.1
+
+# ── Utilities ──────────────────────────────────────────────────────
+numpy>=2.1.0,<3.0.0
+tiktoken>=0.8.0

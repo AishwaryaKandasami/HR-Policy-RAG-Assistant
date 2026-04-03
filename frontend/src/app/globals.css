@@ -1,0 +1,72 @@
+/**
+ * globals.css — HR Policy Q&A Frontend Styles
+ * ==========================================
+ * Updated for Tailwind CSS v4 compatibility.
+ */
+
+@import "tailwindcss";
+
+@theme {
+  /* Core Brand Colors */
+  --color-primary: hsl(221.2 83.2% 53.3%);
+  --color-primary-foreground: hsl(210 40% 98%);
+  --color-secondary: hsl(210 40% 96.1%);
+  --color-secondary-foreground: hsl(222.2 47.4% 11.2%);
+  --color-muted: hsl(210 40% 96.1%);
+  --color-muted-foreground: hsl(215.4 16.3% 46.9%);
+  --color-accent: hsl(210 40% 96.1%);
+  --color-accent-foreground: hsl(222.2 47.4% 11.2%);
+  --color-destructive: hsl(0 84.2% 60.2%);
+  --color-destructive-foreground: hsl(210 40% 98%);
+  
+  --color-border: hsl(214.3 31.8% 91.4%);
+  --color-input: hsl(214.3 31.8% 91.4%);
+  --color-ring: hsl(221.2 83.2% 53.3%);
+  
+  --color-background: hsl(0 0% 100%);
+  --color-foreground: hsl(222.2 84% 4.9%);
+
+  --radius-lg: 0.5rem;
+}
+
+/* Custom Component Utilities */
+@layer components {
+  /* Premium Sidebar Styling */
+  .sidebar-gradient {
+    @apply bg-gradient-to-br from-slate-950 via-slate-900 to-indigo-950;
+  }
+
+  /* Chat Bubble Spacing */
+  .chat-bubble {
+    @apply p-4 rounded-xl shadow-sm text-sm transition-all duration-200;
+  }
+
+  /* User Message Bubble */
+  .user-bubble {
+    @apply bg-primary text-primary-foreground ml-auto border-none hover:shadow-md;
+  }
+
+  /* Bot Message Bubble */
+  .bot-bubble {
+    @apply bg-white border border-slate-100 mr-auto shadow-sm hover:shadow-md;
+  }
+
+  /* Subtle Fade Animation */
+  .fade-in {
+    transition: opacity 0.3s ease-in-out;
+  }
+
+  /* Source Card Styling */
+  .source-card {
+    @apply bg-slate-50 border border-slate-100 rounded-lg p-3 text-xs text-slate-600 hover:bg-slate-100 cursor-pointer transition-colors;
+  }
+}
+
+@layer base {
+  * {
+    @apply border-border;
+  }
+  body {
+    @apply bg-background text-foreground;
+  }
+}

@@ -1,0 +1,20 @@
+# Sickness Absence Policy — [Demo Doc 2]
+==============================================
+
+## 1. Reporting Sickness
+If you are unable to work due to illness, you must:
+- Notify your manager at least 1 hour before your start time.
+- State the reason for your absence.
+- Estimate how long you will be away.
+
+## 2. Statutory Sick Pay (SSP)
+You are entitled to SSP if you are off work for at least 4 days in a row (including weekends). 
+- SSP is £116.75 per week for up to 28 weeks.
+- The first 3 days of sickness are "waiting days" and are unpaid.
+- You must earn at least £123 per week on average to qualify.
+
+## 3. Fit Notes (Doctors' Note)
+You can self-certify for the first 7 days of illness. 
+- For any absence over 7 days, you must provide a "Fit Note" from your doctor.
+
+[Source: ACAS Sickness Absence Guidance — Jan 2025]

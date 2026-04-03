@@ -1,295 +1,417 @@
-# RAG-Based Mutual Fund FAQ Chatbot — Technical Architecture
+# HR Policy Q&A Bot — Technical Architecture (MVP)
 
-**Platform:** Groww (consumer fintech)  
-**Schemes:** SBI Large Cap Fund · SBI Flexi Cap Fund · SBI Long Term Equity Fund (ELSS)  
-**Sources:** sbimf.com · amfiindia.com · sebi.gov.in · camsonline.com · mfcentral.com
+**Product:** HR Policy Q&A Bot  
+**Target users:** Employees (ask questions), HR Managers (upload docs), Prospects (demo)  
+**Document sources:** User-uploaded HR policy PDFs/DOCX — demo uses 8 free ACAS/CIPD UK documents  
+**Retrieval method:** Hybrid RAG — dense vector search (Qdrant) + sparse keyword search (BM25)
 
 ---
 
-## 1. SYSTEM DIAGRAM
+## 1. CONFIRMED STACK
+
+| Layer | Technology | Cost |
+|---|---|---|
+| **Frontend** | Next.js → Vercel | Free |
+| **Backend** | FastAPI → Hugging Face Spaces (Docker) | Free |
+| **Vector DB** | Qdrant `:memory:` — session-based | Free |
+| **Sparse Search** | rank-bm25 — in-memory | Free |
+| **Embeddings** | OpenAI `text-embedding-3-small` (768-d) | Client API key |
+| **Reranker** | `cross-encoder/ms-marco-MiniLM-L-6-v2` | Free (local model) |
+| **LLM** | Groq / Gemini / OpenAI — client provides API key | Free (client key) |
+| **Demo docs** | 8 ACAS/CIPD PDFs — pre-loaded at startup | Free |
+| **Total** | | **£0** |
+
+---
+
+## 2. SYSTEM DIAGRAM
 
 ### Online Serving Path
 
 ```
-┌────────┐  natural-language   ┌───────────┐  JSON query     ┌──────────────┐
-│  User   │ ──── question ───► │  React UI │ ── + session ──►│  FastAPI      │
-│(Groww)  │                    │ (Next.js) │    metadata     │  API Gateway  │
-└────────┘                    └───────────┘                 └──────┬───────┘
-                                                                   │
-                                                      raw query text
-                                                                   ▼
-                                                          ┌────────────────┐
-                                                          │  GUARDRAIL     │
-                                                          │  (Pre-Filter)  │
-                                                          │  ── advisory?  │
-                                                          │  ── PII scan?  │
-                                                          └───────┬────────┘
-                                                                  │
-                                                    cleaned query (or BLOCK)
-                                                                  ▼
-                                              ┌───────────────────────────────┐
-                                              │     RETRIEVAL ENGINE          │
-                                              │  1. embed query (same model)  │
-                                              │  2. ANN search top-k=5       │
-                                              │  3. re-rank by relevance     │
-                                              └──────────────┬────────────────┘
-                                                             │
-                                                  ranked doc chunks + scores
-                                                             ▼
-                                              ┌───────────────────────────────┐
-                                              │     GENERATION (LLM)          │
-                                              │  prompt = system_instructions │
-                                              │         + retrieved_chunks    │
-                                              │         + user_query          │
-                                              │  output: ≤3 sentences + cite  │
-                                              └──────────────┬────────────────┘
-                                                             │
-                                                   answer + source citation
-                                                             ▼
-                                                    ┌────────────────┐
-                                                    │  GUARDRAIL     │
-                                                    │  (Post-Filter) │
-                                                    │  ── hallucin.? │
-                                                    │  ── advice?    │
-                                                    └───────┬────────┘
-                                                            │
-                                                  validated response JSON
-                                                            ▼
-                                                    ┌───────────┐       ┌────────┐
-                                                    │  React UI │ ─────►│  User  │
-                                                    │ (Next.js) │  card │(Groww) │
-                                                    └───────────┘       └────────┘
+Anyone in the world (employee / HR manager / prospect)
+        │  opens browser
+        ▼
+┌─────────────────────────────────────────────────────────┐
+│             LAYER 1 — FRONTEND (Vercel)                 │
+│                                                         │
+│  ┌──────────────┐  ┌──────────────┐  ┌──────────────┐  │
+│  │  Chat UI     │  │ File Upload  │  │ LLM Selector │  │
+│  │  (thread)    │  │  sidebar     │  │ + API key    │  │
+│  └──────┬───────┘  └──────┬───────┘  └──────┬───────┘  │
+└─────────┼─────────────────┼─────────────────┼───────────┘
+          │           HTTP (REST)              │
+          ▼                 ▼                  ▼
+┌─────────────────────────────────────────────────────────┐
+│       LAYER 2 — BACKEND (Hugging Face Spaces, Docker)   │
+│                                                         │
+│   POST /ingest      POST /query      GET /logs          │
+│        │                 │               │              │
+│        ▼                 ▼               ▼              │
+│   ┌─────────┐    ┌──────────────┐  ┌──────────┐       │
+│   │  Doc    │    │  HR          │  │  Audit   │       │
+│   │  Parser │    │  Guardrails  │  │  Log CSV │       │
+│   │+Chunker │    │  (pre-filter)│  └──────────┘       │
+│   └────┬────┘    └──────┬───────┘                     │
+│        │                │ PASS                         │
+│        ▼                ▼                              │
+│   ┌─────────┐    ┌──────────────────────────────────┐  │
+│   │Embedder │    │       HYBRID RETRIEVAL           │  │
+│   │(OpenAI) │    │                                  │  │
+│   └────┬────┘    │  ┌─────────────┐ ┌────────────┐  │  │
+│        │         │  │ Dense ANN   │ │ BM25       │  │  │
+│        ▼         │  │ (Qdrant)    │ │ (rank-bm25)│  │  │
+│   ┌─────────┐    │  └──────┬──────┘ └─────┬──────┘  │  │
+│   │ Qdrant  │◄───┘         │              │          │  │
+│   │:memory: │         RRF Score Fusion    │          │  │
+│   └─────────┘              └──────┬───────┘          │  │
+│                                   │                   │  │
+│                     Cross-Encoder Reranker            │  │
+│                                   │ top-3 chunks      │  │
+│                                   ▼                   │  │
+│                         ┌─────────────────┐           │  │
+│                         │   LLM ROUTER    │           │  │
+│                         │ Groq / Gemini / │           │  │
+│                         │ OpenAI          │           │  │
+│                         └────────┬────────┘           │  │
+│                                  │ answer + citation   │  │
+└──────────────────────────────────┼─────────────────────┘
+                                   ▼
+                    Frontend renders answer card
+                    + collapsible source citation
 ```
 
 ### Offline Ingestion Pipeline
 
 ```
-┌──────────────┐  raw HTML/PDF   ┌──────────────┐  clean text    ┌──────────────┐
-│  DATA        │ ──────────────► │  PARSER /    │ ────────────► │  CHUNKER     │
-│  SOURCES     │                 │  SCRAPER     │               │  (recursive  │
-│  (5 sites)   │                 │  (Scrapy +   │               │   char-split │
-│              │                 │   pdfplumber)│               │   500 chars) │
-└──────────────┘                 └──────────────┘               └──────┬───────┘
-                                                                       │
-                                                            text chunks + metadata
-                                                                       ▼
-                                                              ┌────────────────┐
-                                                              │  EMBEDDING     │
-                                                              │  MODEL         │
-                                                              │  (OpenAI       │
-                                                              │  text-embed-   │
-                                                              │  3-small)      │
-                                                              └───────┬────────┘
-                                                                      │
-                                                          768-d vectors + metadata
-                                                                      ▼
-                                                              ┌────────────────┐
-                                                              │  VECTOR DB     │
-                                                              │  (Qdrant)      │
-                                                              │  collection:   │
-                                                              │  mf_docs       │
-                                                              └────────────────┘
-
-Trigger: GitHub Actions cron — 1st of every month
+User uploads file (PDF / DOCX / TXT)   OR   Demo docs pre-loaded at startup
+        │
+        ├── .pdf  → pdfplumber   → text per page
+        ├── .docx → python-docx  → paragraphs + headings
+        └── .txt / .md → direct read
+        │
+        ▼
+RecursiveCharacterTextSplitter
+  chunk_size=600 chars, overlap=80 chars
+        │
+        ▼
+Metadata per chunk:
+  { doc_title, doc_type, department, section_heading, page_number,
+    source_filename, ingested_at }
+        │
+        ├──► OpenAI text-embedding-3-small → Qdrant :memory: (dense)
+        └──► rank-bm25 index update (sparse, in-memory)
 ```
 
 ---
 
-## 2. LAYER BREAKDOWN
+## 3. LAYER BREAKDOWN
 
-### Ingestion Layer
+### Frontend (Next.js — Vercel)
 
-| Aspect     | Detail |
-|------------|--------|
-| **What**   | Scrapes the 5 authorised sources, converts HTML/PDF to clean text, chunks it, and loads into vector DB |
-| **Tech**   | **Scrapy** (web crawl) + **pdfplumber** (PDF parse) + **LangChain RecursiveCharacterTextSplitter** |
-| **Why**    | Scrapy handles JavaScript-light public pages efficiently with built-in politeness; pdfplumber extracts tabular scheme data (TER tables, KIM docs) that PyPDF2 mangles; LangChain splitter preserves sentence boundaries — critical when a single sentence contains both expense ratio *and* exit load |
+| Area | Content & Behaviour |
+|---|---|
+| Disclaimer banner | Orange bar: *"Proof of concept — do not upload documents containing real employee personal data."* Dismissible. |
+| Left sidebar | (1) File upload — drag-drop, calls `POST /ingest`, shows uploaded doc list with ✅. (2) LLM selector — dropdown with 5 providers. (3) API key input — password field, sent with each `/query` call. |
+| Main chat area | Full-height message thread. User messages right-aligned. Bot messages left-aligned with avatar. Source citation in collapsible expander below each answer. |
+| Input bar | Text input + send button. Disabled while awaiting response. Shows typing indicator. |
+| Query log button | Fixed bottom-right. Calls `GET /logs` → downloads CSV. |
 
-### Embedding Layer
+### Backend (FastAPI — Hugging Face Spaces Docker)
 
-| Aspect     | Detail |
-|------------|--------|
-| **What**   | Converts text chunks and user queries into dense vectors for semantic search |
-| **Tech**   | **OpenAI text-embedding-3-small** (768 dims) |
-| **Why**    | Best cost-to-quality ratio for short financial text; 768-dim keeps Qdrant index lean (~15K chunks for 3 schemes); same model used at ingest and query time eliminates vector-space mismatch; OpenAI API is already available if using GPT for generation |
+| Endpoint | Method | Input | Output |
+|---|---|---|---|
+| `/ingest` | POST | `multipart/form-data` — one or more files | `{ status, chunks_added, docs[] }` |
+| `/query` | POST | `{ query, llm_provider, api_key, department? }` | `{ answer, source, doc_title, page, blocked, escalated }` |
+| `/logs` | GET | — | CSV file download |
+| `/docs-list` | GET | — | `[{ filename, chunk_count, ingested_at }]` |
+| `/docs` | DELETE | `{ filename }` | `{ status }` |
 
-### Retrieval Layer
+### Hybrid Retrieval
 
-| Aspect     | Detail |
-|------------|--------|
-| **What**   | Embeds the user query, performs ANN search, re-ranks top results |
-| **Tech**   | **Qdrant** (vector DB, self-hosted Docker) + **cosine similarity** + **cross-encoder re-ranker** (ms-marco-MiniLM-L-6-v2) |
-| **Why**    | Qdrant runs locally with zero licence cost, supports payload filtering (filter by `scheme_name` before ANN), and has native Python SDK; cross-encoder re-rank on just 5 candidates is cheap (~20ms) and dramatically boosts precision for near-duplicate financial phrasing ("exit load" vs "redemption charge") |
+| Step | Component | Detail |
+|---|---|---|
+| 1 | Dense search | Qdrant ANN cosine similarity, top-10 |
+| 2 | Sparse search | BM25 keyword match, top-10 |
+| 3 | Fusion | Reciprocal Rank Fusion (RRF) → top-10 merged |
+| 4 | Rerank | cross-encoder/ms-marco-MiniLM-L-6-v2 → top-3 |
 
-### Guardrails Layer
+**Why hybrid matters for HR:**
 
-| Aspect     | Detail |
-|------------|--------|
-| **What**   | Pre-filter blocks advisory/PII queries; post-filter validates answer is grounded and non-advisory |
-| **Tech**   | **Rule-based classifier** (regex + keyword list) for pre-filter + **NLI-based grounding check** (a lightweight entailment model or LLM self-check) for post-filter |
-| **Why**    | Regex is deterministic and fast (<1ms) for catching "should I invest", "which is better", PAN/Aadhaar patterns; NLI grounding check ensures every claim in the answer can be traced to a retrieved chunk — mandatory for SEBI compliance; no external guardrail service needed, keeps latency under control |
+| Search type | Catches |
+|---|---|
+| Dense (semantic) | *"Time off for a new baby"* → maternity/paternity leave |
+| Sparse (BM25) | *"SSP entitlement"*, *"TUPE regulations"*, *"IR35"*, *"ACAS Code"* |
 
-### Generation Layer
+### LLM Router — 5 Provider Options
 
-| Aspect     | Detail |
-|------------|--------|
-| **What**   | Produces a ≤3-sentence answer with exactly one source citation, grounded only in retrieved chunks |
-| **Tech**   | **GPT-4o-mini** via OpenAI API |
-| **Why**    | GPT-4o-mini follows structured prompts reliably (sentence cap, citation format), costs ~$0.15/1M input tokens (budget-friendly for FAQ volume), supports JSON mode for consistent response schema, and handles financial terminology without fine-tuning |
+| Provider | Model | Notes |
+|---|---|---|
+| Groq | Llama 3.1 8B | Free, fastest — best for demo |
+| Groq | Llama 3.3 70B | Free, better quality |
+| Google AI Studio | Gemini Flash 2.0 | Free, strong instruction-following |
+| OpenAI | GPT-3.5 Turbo | Paid, ~£0.001/query |
+| OpenAI | GPT-4o mini | Paid, best quality, ~£0.003/query |
 
-### UI Layer
+### Guardrails
 
-| Aspect     | Detail |
-|------------|--------|
-| **What**   | Chat interface embedded in Groww, renders answer cards with source links |
-| **Tech**   | **Next.js** (React) with a chat widget component |
-| **Why**    | Groww's web stack is React-based; Next.js gives SSR for SEO on FAQ pages, built-in API routes as BFF (backend-for-frontend) if needed, and fast hydration for the chat widget; a single-page chat component keeps scope minimal |
-
----
-
-## 3. DATA FLOW — 2 TRACES
-
-### Trace 1: Factual Query — *"What is the exit load on SBI Large Cap?"*
+Priority order:
 
 ```
-Step  Component           Action                                    Data Passed Forward
-────  ──────────────────  ────────────────────────────────────────  ──────────────────────────────────────
- 1    React UI            User types question, sends POST           { "query": "What is the exit load
-                          /api/chat                                   on SBI Large Cap?" }
-
- 2    FastAPI Gateway      Receives request, forwards to             raw query string
-                          pre-filter guardrail
-
- 3    Pre-Filter           Regex scan: no advisory pattern           query string (PASS)
-      Guardrail            ("should I", "which is better")
-                          PII scan: no PAN/Aadhaar pattern
-
- 4    Embedding            Encode query → 768-d vector              query_vector: float[768]
-
- 5    Qdrant               ANN search, cosine similarity,            top-5 chunks:
-      (Retrieval)          payload filter: scheme="SBI Large Cap"    [{ text: "Exit load: 1% if
-                          returns top-5 chunks                        redeemed before 1 year...",
-                                                                      source: "sbimf.com/sbi-
-                                                                      large-cap", score: 0.91 }, ...]
-
- 6    Cross-Encoder        Re-rank 5 chunks by query relevance      top-3 reranked chunks
-      Re-Ranker
-
- 7    GPT-4o-mini          Prompt:                                   generated answer:
-      (Generation)         SYSTEM: "Answer in ≤3 sentences.          "The exit load on SBI Large Cap
-                           Cite one source. Use ONLY the             Fund is 1% if units are redeemed
-                           provided context."                        within 1 year of allotment. After
-                           CONTEXT: [top-3 chunks]                   1 year, there is no exit load.
-                           QUERY: "What is the exit load..."         (Source: sbimf.com/sbi-large-cap)"
-
- 8    Post-Filter          NLI grounding check: every claim          response JSON (PASS)
-      Guardrail            in answer exists in context chunks ✓
-                          Advisory check: no opinion detected ✓
-
- 9    FastAPI Gateway      Wraps in response schema                  { "answer": "...",
-                                                                      "source_url": "sbimf.com/...",
-                                                                      "grounded": true }
-
-10    React UI             Renders answer card with clickable        User sees answer + source link
-                          source link
+1. INJECTION       → block
+2. PII             → block
+3. SENSITIVE       → escalate to HR team  (no LLM call)
+4. OUT_OF_SCOPE    → fallback
+5. FACTUAL         → retrieve ✅
 ```
 
-### Trace 2: Blocked Query — *"Should I invest in SBI Large Cap or Flexi Cap?"*
-
+**Sensitive escalation triggers** (no LLM call — return HR contact card):
+```python
+ESCALATION_TRIGGERS = [
+    "harassment", "discrimination", "bullying", "complaint",
+    "grievance", "hostile work environment", "retaliation",
+    "unfair dismissal", "wrongful termination", "misconduct report",
+    "ethics violation", "am i being fired", "will i be fired",
+    "sue", "legal action", "tribunal",
+]
 ```
-Step  Component           Action                                    Data Passed Forward
-────  ──────────────────  ────────────────────────────────────────  ──────────────────────────────────────
- 1    React UI            User types question, sends POST           { "query": "Should I invest in
-                          /api/chat                                   SBI Large Cap or Flexi Cap?" }
 
- 2    FastAPI Gateway      Receives request, forwards to             raw query string
-                          pre-filter guardrail
-
- 3    Pre-Filter           Regex match: "should I invest" →          BLOCKED
-      Guardrail            triggers ADVISORY pattern
-                          Action: reject immediately
-
- 4    FastAPI Gateway      Returns canned refusal                    { "answer": "I can only provide
-                          (NO retrieval, NO LLM call)                 factual information about mutual
-                                                                      fund schemes. For investment
-                                                                      advice, please consult a
-                                                                      SEBI-registered advisor.",
-                                                                      "blocked": true,
-                                                                      "block_reason": "advisory_query" }
-
- 5    React UI             Renders refusal card with                 User sees polite refusal +
-                          "consult advisor" message                  advisor link
-
-         ┌──────────────────────────────────────────────────────┐
-         │  NOTE: Steps 4–8 of the normal path are SKIPPED.    │
-         │  No embedding, no vector search, no LLM call.       │
-         │  Latency: <50ms.  Cost: $0.                         │
-         └──────────────────────────────────────────────────────┘
+**In-scope HR topics:**
+```python
+HR_TOPICS = [
+    "annual leave", "holiday", "sick leave", "sickness absence",
+    "maternity", "paternity", "flexible working", "wfh", "remote work",
+    "notice period", "redundancy", "dismissal", "disciplinary",
+    "grievance procedure", "expense", "payroll", "salary", "ssp",
+    "tupe", "ir35", "probation", "performance review", "appraisal",
+    "code of conduct", "dress code", "onboarding", "offboarding",
+]
 ```
 
 ---
 
-## 4. CORE DATA SCHEMAS
+## 4. DATA FLOW TRACES
 
-### Document Chunk (stored in Qdrant)
+### Trace 1: Factual HR Query — *"How many days annual leave am I entitled to?"*
+
+```
+Step  Component             Action                              Result
+────  ────────────────────  ──────────────────────────────────  ─────────────────────────────────
+ 1    Next.js UI            User types question                 POST /query
+ 2    HR Guardrails         No PII, no injection, not sensitive PASS → retrieve
+ 3    OpenAI Embedding      Encode query → 768-d vector         query_vector: float[768]
+ 4    Qdrant Dense          ANN search — top-10 chunks          semantic matches
+ 5    BM25 Sparse           Keyword search — top-10 chunks      "holiday", "annual leave" matches
+ 6    RRF Fusion            Merge + re-score both lists         top-10 fused
+ 7    Cross-Encoder         Rerank → top-3                      best: "28 days statutory minimum..."
+ 8    LLM Router            HR system prompt + context + query  "Full-time employees are entitled
+                                                                to 28 days annual leave including
+                                                                bank holidays. (Holiday Entitlement
+                                                                Guide, Section 2)"
+ 9    Post-Filter           Grounding check ✓                   PASS
+10    Audit Log             Append row to session CSV           logged
+11    Next.js UI            Render answer card + source link    Employee sees cited answer
+```
+
+### Trace 2: Sensitive Query — *"I want to file a harassment complaint"*
+
+```
+Step  Component             Action                              Result
+────  ────────────────────  ──────────────────────────────────  ─────────────────────────────────
+ 1    Next.js UI            User types query                    POST /query
+ 2    HR Guardrails         "harassment complaint" matches      ESCALATE
+                            ESCALATION_TRIGGERS                 (no embedding, no LLM call)
+ 3    Audit Log             Log as escalated=true               logged
+ 4    Next.js UI            Render escalation card              "For harassment or grievance
+                                                                matters, please contact your HR
+                                                                Business Partner directly.
+                                                                This chatbot cannot process
+                                                                complaint submissions."
+```
+
+---
+
+## 5. DATA SCHEMAS
+
+### Qdrant Payload (HR chunk)
 
 ```json
 {
-  "id":            "uuid-v4",
-  "text":          "Exit load: 1% if redeemed before 1 year of allotment...",
-  "embedding":     [0.012, -0.034, ...],       // 768 floats (stored by Qdrant, not in payload)
-  "scheme_name":   "SBI Large Cap Fund",       // payload filter key
-  "source_url":    "https://sbimf.com/sbi-large-cap-fund",
-  "source_site":   "sbimf.com",                // one of 5 authorised domains
-  "doc_type":      "scheme_info",              // enum: scheme_info | kim | sai | factsheet | regulation
-  "section":       "Exit Load",                // section heading from source doc
-  "ingested_at":   "2026-02-01T00:00:00Z",    // ISO-8601, used for freshness checks
-  "chunk_index":   3                           // position within parent document
+  "chunk_text":       "Full-time employees are entitled to 28 days annual leave...",
+  "doc_title":        "Holiday Entitlement Guide",
+  "doc_type":         "guide",
+  "department":       "All",
+  "section_heading":  "2. Statutory Minimum Entitlement",
+  "page_number":      3,
+  "source_filename":  "gov_holiday_entitlement.pdf",
+  "ingested_at":      "2026-04-02T20:00:00Z"
 }
 ```
 
-### Bot Response (sent to UI)
+### Query Response (Backend → Frontend)
 
 ```json
 {
-  "answer":        "The exit load on SBI Large Cap Fund is 1% if redeemed within 1 year. After 1 year, no exit load is applicable. (Source: sbimf.com/sbi-large-cap-fund)",
-  "source_url":    "https://sbimf.com/sbi-large-cap-fund",
-  "grounded":      true,
-  "blocked":       false,
-  "block_reason":  null,
-  "latency_ms":    420,
-  "timestamp":     "2026-02-25T13:31:00Z"
+  "answer":           "Full-time employees are entitled to 28 days annual leave...",
+  "doc_title":        "Holiday Entitlement Guide",
+  "section_heading":  "2. Statutory Minimum Entitlement",
+  "page_number":      3,
+  "source_filename":  "gov_holiday_entitlement.pdf",
+  "grounded":         true,
+  "blocked":          false,
+  "escalated":        false,
+  "llm_used":         "groq_llama_8b",
+  "latency_ms":       450
 }
+```
+
+### Audit Log Row (CSV)
+
+```
+timestamp, query, answer_preview, doc_title, section, page, llm_used, blocked, block_reason, escalated, latency_ms
 ```
 
 ---
 
-## 5. TOP 5 RISKS
+## 6. COMPONENT OVERVIEW
 
-| # | Risk | Mitigation | Owner |
-|---|------|-----------|-------|
-| 1 | **Stale data** — TER/riskometer changes mid-month, chatbot serves outdated facts | Monthly cron re-ingestion + `ingested_at` field; add a "data as of" disclaimer to every response | **Ingestion Pipeline** |
-| 2 | **Hallucination** — LLM fabricates a number (e.g., wrong expense ratio) | Post-generation NLI grounding check; if any claim fails entailment against context, return "I don't have enough information" instead | **Guardrails (Post-Filter)** |
-| 3 | **Advisory leakage** — LLM subtly gives investment advice despite system prompt | Dual-layer defence: regex pre-filter blocks obvious patterns; post-filter scans LLM output for comparative/recommendation language | **Guardrails (Pre + Post)** |
-| 4 | **PII exposure** — User pastes PAN/Aadhaar number in query, gets logged | Pre-filter regex detects PII patterns and rejects query *before* it reaches embedding or LLM; no raw queries are persisted to disk | **Guardrails (Pre-Filter)** |
-| 5 | **Source attribution error** — Answer cites wrong URL or a non-authorised source | `source_url` is carried as chunk metadata from ingestion through retrieval; generation prompt hard-pins citation to the top-ranked chunk's `source_url` field, never asks LLM to generate a URL | **Retrieval + Generation** |
+| Component | File | Description |
+|---|---|---|
+| Document parser | `hr_doc_loader.py` | Extracts text from PDF, DOCX, TXT. Attaches metadata per chunk. |
+| Ingestion pipeline | `hr_ingest.py` | Chunks text, embeds with OpenAI, upserts to Qdrant and BM25 index. |
+| Embeddings | OpenAI `text-embedding-3-small` | 768-d dense vectors for semantic search. |
+| Vector store | Qdrant `:memory:` | Holds embedded HR doc chunks for the session. Collection: `hr_docs`. |
+| Sparse search | `rank-bm25` in-memory index | Keyword match for exact HR terms (SSP, TUPE, IR35, ACAS). |
+| Retriever | `retriever.py` | Dense ANN + BM25 → RRF fusion → cross-encoder rerank → top-3. |
+| Reranker | `cross-encoder/ms-marco-MiniLM-L-6-v2` | Local model, scores top-10 fused chunks to return best top-3. |
+| LLM router | `generator.py` | Routes to Groq / Gemini / OpenAI based on user's dropdown selection. |
+| Guardrails | `hr_guardrails.py` | Blocks PII and injection; escalates sensitive HR queries; filters out-of-scope. |
+| System prompt | `hr_system_prompt.txt` | HR persona, UK employment context, citation format, refusal rules. |
+| Audit logger | `audit_log.py` | Appends every query and response to a session-scoped CSV. |
+| API server | `main.py` | FastAPI — exposes all endpoints, handles CORS, pre-loads demo docs at startup. |
+| Frontend | Next.js (Vercel) | Chat UI, file upload sidebar, LLM selector, API key input, query log button. |
 
 ---
 
-## SINGLE BIGGEST ARCHITECTURAL RISK
+## 7. FILE STRUCTURE
 
-> **Hallucination of financial numbers.**
->
-> A wrong expense ratio or exit load percentage could mislead investors and
-> create regulatory liability under SEBI's Mutual Fund Regulations. 
->
-> **Mitigation stack:**
-> 1. System prompt: *"Use ONLY the provided context. If the answer is not
->    in the context, say 'I don't have this information.'"*
-> 2. Low temperature (0.0) on GPT-4o-mini to minimize creative generation.
-> 3. Post-generation NLI grounding check: every factual claim in the answer
->    must be entailed by at least one retrieved chunk.
-> 4. If grounding check fails → suppress the answer, return safe fallback.
-> 5. Monthly data refresh ensures the context itself stays current.
->
-> **Owner:** Guardrails (Post-Filter) + Generation Layer jointly.
+```
+HR_BOT/
+│
+├── backend/                          ← Python FastAPI (→ Hugging Face Spaces)
+│   ├── main.py                       🆕 FastAPI app — all endpoints
+│   ├── hr_doc_loader.py              🆕 PDF/DOCX/TXT parser + metadata
+│   ├── hr_ingest.py                  — chunking, embedding, Qdrant + BM25 upsert
+│   ├── retriever.py                  — hybrid BM25 + dense ANN + RRF + reranker
+│   ├── generator.py                  — multi-LLM router (Groq / Gemini / OpenAI)
+│   ├── hr_guardrails.py              — HR rules, escalation triggers, PII detection
+│   ├── hr_system_prompt.txt          — HR persona, UK context, citation rules
+│   ├── audit_log.py                  — session-scoped CSV logger
+│   ├── Dockerfile                    — HF Spaces Docker container definition
+│   ├── requirements.txt              — all Python dependencies
+│   └── .env.example
+│
+├── frontend/                         ← Next.js (→ Vercel)
+│   ├── app/
+│   │   ├── page.tsx                  🆕 Main chat page
+│   │   └── layout.tsx                🆕 Root layout + disclaimer banner
+│   ├── components/
+│   │   ├── ChatThread.tsx            🆕 Message list
+│   │   ├── MessageBubble.tsx         🆕 User/bot bubble + source expander
+│   │   ├── Sidebar.tsx               🆕 Upload + LLM selector + API key
+│   │   ├── FileUploader.tsx          🆕 Drag-drop → POST /ingest
+│   │   ├── LLMSelector.tsx           🆕 5-provider dropdown
+│   │   ├── DisclaimerBanner.tsx      🆕 Orange dismissible bar
+│   │   └── QueryLogButton.tsx        🆕 Fixed → GET /logs CSV
+│   ├── lib/api.ts                    🆕 HTTP client for backend calls
+│   └── package.json
+│
+└── demo_docs/                        ← 8 ACAS/CIPD sample HR documents
+    ├── acas_disciplinary_procedure.pdf
+    ├── acas_grievance_policy.pdf
+    ├── acas_sickness_absence.pdf
+    ├── acas_flexible_working.pdf
+    ├── acas_redundancy_procedure.pdf
+    ├── gov_holiday_entitlement.pdf
+    ├── cipd_bullying_harassment.pdf
+    └── cipd_staff_handbook.pdf
+```
+
+---
+
+## 8. DEPENDENCIES
+
+```text
+# New
+fastapi>=0.115.0          # API server
+uvicorn>=0.32.0           # ASGI server
+python-docx>=1.1.0        # DOCX parsing
+rank-bm25>=0.2.2          # BM25 sparse search
+google-generativeai>=0.8  # Gemini Flash support
+python-multipart>=0.0.9   # File upload handling
+
+# Core dependencies
+openai>=1.63.2
+groq>=0.18.0
+qdrant-client>=1.13.3
+sentence-transformers>=3.4.1
+langchain-text-splitters>=0.3.0
+pdfplumber>=0.11.6
+python-dotenv>=1.0.1
+```
+
+---
+
+## 9. BUILD PHASES
+
+### Phase 1 — Backend Core
+- [ ] FastAPI project setup with CORS
+- [ ] `hr_doc_loader.py` — PDF + DOCX + TXT parser
+- [ ] `hr_ingest.py` — chunk, embed, Qdrant + BM25 upsert
+- [ ] `POST /ingest`, `GET /docs-list`, `DELETE /docs` endpoints
+- [ ] Pre-load 3 ACAS demo docs at startup, test ingestion
+
+### Phase 2 — Hybrid Retrieval + Generation
+- [ ] BM25 index + RRF fusion in `retriever.py`
+- [ ] Multi-LLM router in `generator.py`
+- [ ] `hr_system_prompt.txt`
+- [ ] `POST /query` endpoint — full pipeline
+- [ ] Test with Groq Llama 3.1 8B against demo docs
+
+### Phase 3 — Guardrails + Audit Log
+- [ ] `hr_guardrails.py` — escalation + PII + injection + OOS
+- [ ] `audit_log.py` — session CSV logger
+- [ ] `GET /logs` endpoint
+- [ ] Unit test all guardrail cases
+
+### Phase 4 — Docker + HF Spaces Deploy
+- [ ] Write `Dockerfile` for FastAPI app
+- [ ] Create Hugging Face Space (Docker SDK)
+- [ ] Push backend, verify public URL is live
+- [ ] Test all endpoints from external client
+
+### Phase 5 — Next.js Frontend
+- [ ] Scaffold Next.js + Tailwind CSS
+- [ ] Build all components (sidebar, chat, disclaimer, log button)
+- [ ] Wire to backend via `lib/api.ts`
+- [ ] Deploy to Vercel, set backend URL env var
+
+### Phase 6 — Integration Test + Demo Prep
+- [ ] Load all 8 ACAS/CIPD docs
+- [ ] Run 20+ HR query tests (all 6 spec example interactions)
+- [ ] Verify escalation triggers on sensitive queries
+- [ ] Test all 5 LLM providers
+- [ ] Final smoke test end-to-end
+
+---
+
+## 10. RISKS & MITIGATIONS
+
+| # | Risk | Mitigation |
+|---|---|---|
+| 1 | **Stale policies** — bot serves outdated rules | `effective_date` in every chunk; UI shows "Policy as of [date]" |
+| 2 | **Hallucination** — LLM invents leave counts or policy numbers | Post-generation grounding check; temperature=0.0 |
+| 3 | **Escalation gap** — sensitive query answered by LLM | Hard pre-filter block; no LLM call made for escalation triggers |
+| 4 | **Employee PII in query** | PII pre-filter in `hr_guardrails.py`; blocks before embedding or LLM call |
+| 5 | **Multi-doc conflicts** — two policies say different things | `department` filter; LLM instructed to cite which policy applies |
+| 6 | **Confidential doc uploaded** | Disclaimer banner; MVP instructs no real employee data |
+| 7 | **HF Spaces cold start** | Cross-encoder + demo docs pre-loaded at startup; ~30s first load |

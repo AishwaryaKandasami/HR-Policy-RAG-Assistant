@@ -1,21 +1,58 @@
-# ── API keys ──────────────────────────────────────────
+# ── API keys & Secrets ──────────────────────────────────
 .env
+.env.local
+.env.*.local
+
+# ── HR Bot Specifics ────────────────────────────────────
+backend/session_audit.csv
+backend/debug_qdrant.py
+backend/hr_system_prompt.txt.bak
 
 # ── Python ────────────────────────────────────────────
 __pycache__/
 *.pyc
 *.pyo
+*.pyd
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
 *.egg-info/
+.installed.cfg
+*.egg
+MANIFEST
 
 # ── Virtual environments ─────────────────────────────
 venv/
 .venv/
+env/
+ENV/
+env.bak/
+venv.bak/
 
-# ── Vector store (large binaries — rebuilt at runtime) ─
-# vector_store/*.qdrant
-# vector_store/*.json
-# vector_store/*.snapshot
+# ── Next.js / Node ────────────────────────────────────
+node_modules/
+frontend/node_modules/
+frontend/.next/
+frontend/out/
+frontend/build/
+.npm
+.eslintcache
 
 # ── OS junk ───────────────────────────────────────────
 .DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
 Thumbs.db
