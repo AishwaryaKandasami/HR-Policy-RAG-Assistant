@@ -14,10 +14,16 @@ Demo docs (ACAS/CIPD PDFs in demo_docs/) are pre-loaded at startup
 if OPENAI_API_KEY is present in the environment.
 """
 
+import json
 import os
 import pathlib
 import tempfile
+import uuid
 from contextlib import asynccontextmanager
+from dotenv import load_dotenv
+
+# Load .env from project root
+load_dotenv(pathlib.Path(__file__).parent.parent / ".env")
 
 from fastapi import FastAPI, File, Form, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
@@ -25,10 +31,10 @@ from fastapi.responses import FileResponse, JSONResponse
 from pydantic import BaseModel, Field
 from typing import Optional
 
-from audit_log import get_log_file_path, log_interaction
+from audit_log import get_log_file_path, log_interaction, log_feedback
 from generator import generate_answer
 from hr_guardrails import classify_query
-from hr_ingest import delete_doc, get_ingested_docs, get_openai, ingest_file
+from hr_ingest import delete_doc, get_embed_model, get_ingested_docs, get_openai, get_qdrant, ingest_file
 from retriever import retrieve
 
 
@@ -48,13 +54,23 @@ class QueryResponse(BaseModel):
     llm_used: str
     success: bool
     status: str = "PASS"   # PASS, BLOCK, ESCALATE
+    confidence_score: float = 0.0
+    confidence_label: str = "N/A"
     latency_ms: Optional[float] = None
+    query_id: str = "none"
+
+
+class FeedbackRequest(BaseModel):
+    query_id: str
+    rating: str = Field(..., pattern="^(up|down)$")
+    reason: Optional[str] = Field(None, description="One of: Wrong answer, Incomplete, Not what I meant")
 
 
 # ── Startup: pre-load demo docs ────────────────────────────────────
 
 DEMO_DOCS_DIR = pathlib.Path(__file__).parent.parent / "demo_docs"
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "")
+EMBED_DIMS = 384  # Match all-MiniLM-L6-v2
 
 SUPPORTED_EXTENSIONS = {".pdf", ".docx", ".txt", ".md"}
 
@@ -62,17 +78,18 @@ SUPPORTED_EXTENSIONS = {".pdf", ".docx", ".txt", ".md"}
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """
-    On startup: ingest all PDFs from demo_docs/ if OPENAI_API_KEY is set.
-    This gives every new session an immediate knowledge base to query against.
+    On startup: ingest all PDFs from demo_docs/ if available.
+    Uses free local embeddings by default.
     """
-    if OPENAI_API_KEY and DEMO_DOCS_DIR.exists():
+    if DEMO_DOCS_DIR.exists():
         demo_files = sorted(DEMO_DOCS_DIR.glob("*"))
         eligible = [f for f in demo_files if f.suffix.lower() in SUPPORTED_EXTENSIONS]
         if eligible:
-            print(f"\n📂 Pre-loading {len(eligible)} demo HR document(s)...")
+            print(f"\n📂 Pre-loading {len(eligible)} demo HR document(s) (Free Local Embeddings)...")
             for doc_path in eligible:
                 try:
-                    result = ingest_file(str(doc_path), api_key=OPENAI_API_KEY)
+                    # Ingest using local embeddings (no OpenAI key needed)
+                    result = ingest_file(str(doc_path), original_filename=doc_path.name)
                     print(
                         f"  ✅ {result['doc_title']}"
                         f" — {result['chunks_added']} chunks"
@@ -83,10 +100,7 @@ async def lifespan(app: FastAPI):
         else:
             print("ℹ  demo_docs/ exists but contains no supported files.")
     else:
-        if not OPENAI_API_KEY:
-            print("ℹ  OPENAI_API_KEY not set — skipping demo doc pre-load.")
-        if not DEMO_DOCS_DIR.exists():
-            print(f"ℹ  demo_docs/ directory not found at {DEMO_DOCS_DIR}")
+        print(f"ℹ  demo_docs/ directory not found at {DEMO_DOCS_DIR}")
 
     yield  # app runs here
 
@@ -152,8 +166,7 @@ async def ingest_documents(
             tmp_path = tmp.name
 
         try:
-            result = ingest_file(tmp_path, api_key=api_key)
-            result["filename"] = filename  # restore original name
+            result = ingest_file(tmp_path, api_key=api_key, original_filename=filename)
             results.append(result)
         except EnvironmentError as e:
             # Bad API key or missing env var — surface clearly
@@ -233,6 +246,7 @@ async def query_hr_bot(request: QueryRequest):
     """
     import time
     start_time = time.perf_counter()
+    query_id = str(uuid.uuid4())
 
     # 1. Guardrails (Safety Check)
     guard = classify_query(request.query)
@@ -240,6 +254,7 @@ async def query_hr_bot(request: QueryRequest):
     if guard["status"] != "PASS":
         latency = (time.perf_counter() - start_time) * 1000
         log_interaction(
+            query_id=query_id,
             query=request.query,
             answer=guard["message"],
             blocked=(guard["status"] == "BLOCK"),
@@ -253,28 +268,29 @@ async def query_hr_bot(request: QueryRequest):
             llm_used="none",
             success=False,
             status=guard["status"],
-            latency_ms=latency
+            confidence_score=0.0,
+            confidence_label="N/A",
+            latency_ms=latency,
+            query_id=query_id
         )
 
-    # 2. Embed Query (OpenAI)
+    # 2. Embed Query (Locally using SentenceTransformer)
     try:
-        openai_client = get_openai(api_key=request.openai_api_key)
-        embed_resp = openai_client.embeddings.create(
-            model="text-embedding-3-small",
-            input=[request.query],
-            dimensions=768
-        )
-        query_vector = embed_resp.data[0].embedding
+        qdrant = get_qdrant()
+        embed_model = get_embed_model()
+        query_vector = embed_model.encode(request.query).tolist()
     except Exception as e:
         raise HTTPException(status_code=400, detail=f"Embedding error: {str(e)}")
 
     # 3. Hybrid Retrieve (Qdrant + BM25 + RRF + Rerank)
     try:
-        retrieved_chunks = retrieve(
+        retrieval_data = retrieve(
             query_text=request.query,
             query_vector=query_vector,
             top_k=3
         )
+        retrieved_chunks = retrieval_data["chunks"]
+        confidence_score = retrieval_data["confidence_score"]
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Retrieval error: {str(e)}")
 
@@ -283,13 +299,15 @@ async def query_hr_bot(request: QueryRequest):
         query=request.query,
         retrieved_chunks=retrieved_chunks,
         model_alias=request.llm_provider,
-        api_key=request.provider_api_key or request.openai_api_key
+        api_key=request.provider_api_key or request.openai_api_key,
+        confidence_score=confidence_score
     )
 
     latency = (time.perf_counter() - start_time) * 1000
 
     # 5. Log Result
     log_interaction(
+        query_id=query_id,
         query=request.query,
         answer=gen_result.get("answer", ""),
         sources=retrieved_chunks,
@@ -299,15 +317,13 @@ async def query_hr_bot(request: QueryRequest):
         latency_ms=latency
     )
 
-    if not gen_result.get("success"):
-        return QueryResponse(
-            answer=gen_result.get("answer", "Unknown generation error."),
-            sources=[],
-            llm_used="error",
-            success=False,
-            status="PASS",
-            latency_ms=latency
-        )
+    # 5. Determine Confidence Label
+    if confidence_score > 0.7:
+        confidence_label = "High"
+    elif confidence_score >= 0.4:
+        confidence_label = "Medium"
+    else:
+        confidence_label = "Low"
 
     return QueryResponse(
         answer=gen_result["answer"],
@@ -315,8 +331,32 @@ async def query_hr_bot(request: QueryRequest):
         llm_used=gen_result["model_used"],
         success=True,
         status="PASS",
-        latency_ms=latency
+        confidence_score=confidence_score,
+        confidence_label=confidence_label,
+        latency_ms=latency,
+        query_id=query_id
     )
+
+
+@app.post("/feedback", summary="Submit feedback for a previous query")
+async def submit_feedback(request: FeedbackRequest):
+    """
+    Associate a thumbs-up (up) or thumbs-down (down) with a query ID.
+    Optional reasons for thumbs-down: 'Wrong answer', 'Incomplete', 'Not what I meant'.
+    """
+    success = log_feedback(
+        query_id=request.query_id, 
+        rating=request.rating, 
+        reason=request.reason
+    )
+    
+    if not success:
+        raise HTTPException(
+            status_code=404, 
+            detail=f"Query ID {request.query_id} not found in this session."
+        )
+        
+    return {"status": "ok", "message": "Feedback recorded."}
 
 
 # ── GET /logs ──────────────────────────────────────────────────────
@@ -338,3 +378,19 @@ async def get_audit_logs():
         filename="hr_bot_audit_log.csv",
         media_type="text/csv"
     )
+
+# ── GET /onboarding-checklist ──────────────────────────────────────
+
+@app.get("/onboarding-checklist", summary="Get onboarding checklist")
+async def get_onboarding_checklist():
+    """
+    Returns the onboarding checklist tasks grouped by phase.
+    """
+    checklist_path = pathlib.Path(__file__).parent / "onboarding_checklist.json"
+    if not checklist_path.exists():
+        raise HTTPException(status_code=404, detail="Checklist not found.")
+    
+    with open(checklist_path, "r", encoding="utf-8") as f:
+        data = json.load(f)
+        
+    return JSONResponse(content=data)

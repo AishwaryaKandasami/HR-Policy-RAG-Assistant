@@ -1,0 +1,100 @@
+[
+  {
+    "id": "t1",
+    "phase": "Before Day 1",
+    "title": "Sign Employment Contract",
+    "description": "Review and sign your digital employment contract through the HR portal.",
+    "related_policy": "What is the policy regarding employment contracts and right to work checks?"
+  },
+  {
+    "id": "t2",
+    "phase": "Before Day 1",
+    "title": "Request IT Equipment",
+    "description": "Submit the hardware request form so your laptop and accessories are ready for your first day.",
+    "related_policy": "What are the rules and guidelines for using company IT equipment?"
+  },
+  {
+    "id": "t3",
+    "phase": "Before Day 1",
+    "title": "Submit System Access Form",
+    "description": "Request access to necessary tools like email, Slack, and internal systems.",
+    "related_policy": "What is the procedure for getting access to internal IT systems?"
+  },
+  {
+    "id": "t4",
+    "phase": "Day 1",
+    "title": "Meet Your Manager",
+    "description": "Have a 30-minute introductory meeting with your manager to discuss your role.",
+    "related_policy": "What should happen during the first day of onboarding with a manager?"
+  },
+  {
+    "id": "t5",
+    "phase": "Day 1",
+    "title": "Complete Right to Work Check",
+    "description": "Bring your passport or relevant visa documentation to HR for verification.",
+    "related_policy": "What is the process for completing right to work checks?"
+  },
+  {
+    "id": "t6",
+    "phase": "Day 1",
+    "title": "Set Up Your Laptop",
+    "description": "Log in to your new device, configure passwords, and install essential software via the self-service portal.",
+    "related_policy": "How do I report an issue with my new laptop or IT equipment?"
+  },
+  {
+    "id": "t7",
+    "phase": "Day 1",
+    "title": "Get Building Access",
+    "description": "Pick up your physical access badge from the ground floor reception.",
+    "related_policy": "What are the rules regarding building access badges and security?"
+  },
+  {
+    "id": "t8",
+    "phase": "Week 1",
+    "title": "Read Staff Handbook",
+    "description": "Review the core company policies, including working hours, dress code, and expected conduct.",
+    "related_policy": "What does the staff handbook say about working hours and dress code?"
+  },
+  {
+    "id": "t9",
+    "phase": "Week 1",
+    "title": "Set Up Payroll Details",
+    "description": "Enter your bank account information and national insurance number into the payroll system.",
+    "related_policy": "What is the process for submitting bank details for payroll?"
+  },
+  {
+    "id": "t10",
+    "phase": "Week 1",
+    "title": "Complete Mandatory E-Learning",
+    "description": "Finish the required online training modules covering general compliance and ethics.",
+    "related_policy": "What happens if an employee fails to complete mandatory training?"
+  },
+  {
+    "id": "t11",
+    "phase": "First Month",
+    "title": "Complete Health and Safety Training",
+    "description": "Undergo fundamental health and safety compliance training tailored to our office environment.",
+    "related_policy": "What are the health and safety responsibilities of a new employee?"
+  },
+  {
+    "id": "t12",
+    "phase": "First Month",
+    "title": "Complete GDPR Awareness Training",
+    "description": "Ensure you understand how to safely handle and process personally identifiable information.",
+    "related_policy": "What is the data protection and GDPR policy regarding personal data?"
+  },
+  {
+    "id": "t13",
+    "phase": "First Month",
+    "title": "Schedule Probation Review",
+    "description": "Book a meeting for your first major performance and probationary check-in.",
+    "related_policy": "What is the standard procedure for a probation period review?"
+  },
+  {
+    "id": "t14",
+    "phase": "First Month",
+    "title": "1-1 Check-in with HR",
+    "description": "A quick 15-minute sync with HR to ensure everything is going smoothly with your onboarding.",
+    "related_policy": "How can I raise a question or concern with HR during my probation?"
+  }
+]

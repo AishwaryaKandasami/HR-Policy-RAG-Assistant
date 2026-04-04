@@ -1,36 +1,34 @@
 """
 audit_log.py — HR Bot Session Audit Logger
 ===========================================
-Appends every query attempt (and its result) to a session-level CSV.
-Ensures HR managers can audit bot interactions for policy accuracy.
+Stores every query attempt and allows for feedback updates (thumbs up/down).
+HR managers can download the session audit as a CSV.
 """
 
 import csv
 import datetime
 import os
-from typing import Optional
+from typing import List, Optional
 
 # ── Config ──────────────────────────────────────────────────────────
 LOG_FILE = "session_audit.csv"
 
 # Columns to log
 HEADERS = [
-    "timestamp", "query", "answer_preview", "doc_title", "section", 
-    "page", "llm_used", "blocked", "block_reason", "escalated", "latency_ms"
+    "query_id", "timestamp", "query", "answer_preview", "doc_title", "section", 
+    "page", "llm_used", "blocked", "block_reason", "escalated", 
+    "latency_ms", "rating", "feedback_reason"
 ]
 
-
-def _initialize_log_file():
-    """Create the CSV with headers if it doesn't exist."""
-    if not os.path.exists(LOG_FILE):
-        with open(LOG_FILE, mode="w", newline="", encoding="utf-8") as f:
-            writer = csv.DictWriter(f, fieldnames=HEADERS)
-            writer.writeheader()
+# ── Session State (In-Memory) ───────────────────────────────────────
+# We keep an in-memory list so we can update rows with feedback (UUID-based).
+SESSION_LOG: List[dict] = []
 
 
 # ── Public API ──────────────────────────────────────────────────────
 
 def log_interaction(
+    query_id: str,
     query: str,
     answer: str = "",
     sources: list[dict] = [],
@@ -41,10 +39,8 @@ def log_interaction(
     latency_ms: float = 0.0
 ):
     """
-    Records a single query-answer interaction into the session CSV.
+    Records a single query-answer interaction into the session store.
     """
-    _initialize_log_file()
-    
     # Extract first source metadata if present
     doc_title = sources[0].get("doc_title", "N/A") if sources else "N/A"
     section   = sources[0].get("section_heading", "N/A") if sources else "N/A"
@@ -54,6 +50,7 @@ def log_interaction(
     answer_preview = (answer[:100] + "...") if len(answer) > 100 else answer
 
     row = {
+        "query_id":       query_id,
         "timestamp":      datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
         "query":          query,
         "answer_preview": answer_preview.replace("\n", " "),
@@ -64,14 +61,34 @@ def log_interaction(
         "blocked":        str(blocked).lower(),
         "block_reason":   block_reason or "",
         "escalated":      str(escalated).lower(),
-        "latency_ms":     f"{latency_ms:.2f}"
+        "latency_ms":     f"{latency_ms:.2f}",
+        "rating":         "",
+        "feedback_reason": ""
     }
+    
+    SESSION_LOG.append(row)
 
-    with open(LOG_FILE, mode="a", newline="", encoding="utf-8") as f:
-        writer = csv.DictWriter(f, fieldnames=HEADERS)
-        writer.writerow(row)
+
+def log_feedback(query_id: str, rating: str, reason: Optional[str] = None):
+    """
+    Finds a previously logged interaction by query_id and updates its feedback.
+    """
+    for row in SESSION_LOG:
+        if row["query_id"] == query_id:
+            row["rating"] = rating
+            row["feedback_reason"] = reason or ""
+            return True
+    return False
 
 
 def get_log_file_path() -> str:
-    """Return the absolute path to the session log file."""
+    """
+    Generates a fresh CSV from the in-memory session log and 
+    returns its absolute path.
+    """
+    with open(LOG_FILE, mode="w", newline="", encoding="utf-8") as f:
+        writer = csv.DictWriter(f, fieldnames=HEADERS)
+        writer.writeheader()
+        writer.writerows(SESSION_LOG)
+        
     return os.path.abspath(LOG_FILE)

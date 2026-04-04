@@ -15,6 +15,7 @@ import os
 from typing import Optional
 
 from sentence_transformers import CrossEncoder
+import torch
 
 from hr_ingest import COLLECTION_NAME, get_bm25, get_qdrant
 
@@ -43,7 +44,7 @@ def _rrf_score(ranks: list[int]) -> float:
     return sum(1.0 / (RRF_K + r) for r in ranks)
 
 
-def retrieve(query_text: str, query_vector: list[float], top_k: int = 3) -> list[dict]:
+def retrieve(query_text: str, query_vector: list[float], top_k: int = 3) -> dict:
     """
     Main retrieval entry point.
     1. Search Dense (Qdrant)
@@ -56,7 +57,7 @@ def retrieve(query_text: str, query_vector: list[float], top_k: int = 3) -> list
 
     if not bm25_corpus:
          # store is empty
-         return []
+        return {"chunks": [], "confidence_score": 0.0}
 
     # ── 1. Dense Search (top-10) ──────────────────────────────────
     # Note: Using query_points for better compatibility with Python 3.14+
@@ -111,7 +112,7 @@ def retrieve(query_text: str, query_vector: list[float], top_k: int = 3) -> list
     fused_results = sorted(fused_results, key=lambda x: x["rrf_score"], reverse=True)[:FUSE_TOP_K]
 
     if not fused_results:
-        return []
+        return {"chunks": [], "confidence_score": 0.0}
 
     # ── 4. Cross-Encoder Reranking ──────────────────────────────────
     reranker = _get_reranker()
@@ -126,12 +127,21 @@ def retrieve(query_text: str, query_vector: list[float], top_k: int = 3) -> list
 
     final_results = sorted(fused_results, key=lambda x: x["rerank_score"], reverse=True)[:top_k]
 
+    # ── 5. Confidence Score ─────────────────────────────────────────
+    # The top chunk's rerank score is our raw confidence logit.
+    # We pass it through a sigmoid to get a 0-1 probability.
+    top_score = final_results[0]["rerank_score"] if final_results else 0.0
+    confidence_score = torch.sigmoid(torch.tensor(top_score)).item()
+
     # Format for downstream
-    return [
-        {
-            "text": res["text"],
-            "metadata": res["payload"],
-            "score": res["rerank_score"]
-        }
-        for res in final_results
-    ]
+    return {
+        "chunks": [
+            {
+                "text": res["text"],
+                "metadata": res["payload"],
+                "score": res["rerank_score"]
+            }
+            for res in final_results
+        ],
+        "confidence_score": confidence_score
+    }

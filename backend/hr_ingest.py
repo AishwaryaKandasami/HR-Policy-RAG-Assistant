@@ -11,6 +11,7 @@ The BM25 index is rebuilt from scratch whenever a document is added or deleted.
 """
 
 import os
+import pathlib
 import time
 import uuid
 from typing import Optional
@@ -19,6 +20,7 @@ from dotenv import load_dotenv
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 from openai import OpenAI
 from qdrant_client import QdrantClient
+from sentence_transformers import SentenceTransformer
 from qdrant_client.models import (
     Distance,
     FieldCondition,
@@ -33,14 +35,15 @@ from hr_doc_loader import load_document
 
 # ── Config ────────────────────────────────────────────────────────
 COLLECTION_NAME = "hr_docs"
-EMBED_MODEL     = "text-embedding-3-small"
-EMBED_DIMS      = 768
+EMBED_MODEL     = "all-MiniLM-L6-v2"
+EMBED_DIMS      = 384
 CHUNK_SIZE      = 600   # characters
 CHUNK_OVERLAP   = 80
-BATCH_SIZE      = 20    # OpenAI embedding batch size
+BATCH_SIZE      = 32    # Local batch size
 
 # ── Module-level singletons ────────────────────────────────────────
 _qdrant_client: Optional[QdrantClient] = None
+_embed_model: Optional[SentenceTransformer] = None
 _openai_client: Optional[OpenAI] = None
 _bm25_index: Optional[BM25Okapi] = None
 _bm25_corpus: list[dict] = []   # [{text, metadata}] — parallel to BM25 tokenised docs
@@ -60,19 +63,25 @@ def get_qdrant() -> QdrantClient:
     return _qdrant_client
 
 
+def get_embed_model() -> SentenceTransformer:
+    """Return (and lazily initialise) the local SentenceTransformer model."""
+    global _embed_model
+    if _embed_model is None:
+        print(f"📥 Loading local embedding model ({EMBED_MODEL})...")
+        _embed_model = SentenceTransformer(EMBED_MODEL)
+    return _embed_model
+
+
 def get_openai(api_key: str | None = None) -> OpenAI:
-    """Return (and lazily initialise) the OpenAI client."""
+    """Return (and lazily initialise) the OpenAI client (for LLM only)."""
     global _openai_client
     if _openai_client is None:
         if not api_key:
-            load_dotenv()
+            load_dotenv(pathlib.Path(__file__).parent.parent / ".env")
             api_key = os.getenv("OPENAI_API_KEY")
-        if not api_key:
-            raise EnvironmentError(
-                "OPENAI_API_KEY is not set. "
-                "Pass it via the api_key parameter or set it in .env."
-            )
-        _openai_client = OpenAI(api_key=api_key)
+        # Allow running without OpenAI key if only using Groq/Gemini
+        if api_key:
+            _openai_client = OpenAI(api_key=api_key)
     return _openai_client
 
 
@@ -108,30 +117,13 @@ def chunk_records(records: list[dict]) -> list[dict]:
     return chunks
 
 
-def embed_texts(client: OpenAI, texts: list[str]) -> list[list[float]]:
+def embed_texts(texts: list[str]) -> list[list[float]]:
     """
-    Batch-embed a list of strings using OpenAI text-embedding-3-small.
-    Respects rate limits with a brief pause between batches.
+    Batch-embed a list of strings locally using all-MiniLM-L6-v2.
     """
-    all_embeddings: list[list[float]] = []
-
-    for i in range(0, len(texts), BATCH_SIZE):
-        batch = texts[i: i + BATCH_SIZE]
-        response = client.embeddings.create(
-            model=EMBED_MODEL,
-            input=batch,
-            dimensions=EMBED_DIMS,
-        )
-        # Preserve API ordering
-        batch_embeds: list[Optional[list[float]]] = [None] * len(batch)
-        for item in response.data:
-            batch_embeds[item.index] = item.embedding
-        all_embeddings.extend(batch_embeds)
-
-        if i + BATCH_SIZE < len(texts):
-            time.sleep(0.3)  # brief pause to stay within rate limits
-
-    return all_embeddings
+    model = get_embed_model()
+    embeddings = model.encode(texts, batch_size=BATCH_SIZE, show_progress_bar=False)
+    return [vec.tolist() for vec in embeddings]
 
 
 def _rebuild_bm25(corpus: list[dict]) -> None:
@@ -150,7 +142,7 @@ def _rebuild_bm25(corpus: list[dict]) -> None:
 
 # ── Public ingestion API ───────────────────────────────────────────
 
-def ingest_file(file_path: str, api_key: str | None = None) -> dict:
+def ingest_file(file_path: str, api_key: str | None = None, original_filename: str | None = None) -> dict:
     """
     Full ingestion pipeline for a single file:
       1. Parse (PDF / DOCX / TXT)
@@ -186,14 +178,26 @@ def ingest_file(file_path: str, api_key: str | None = None) -> dict:
             "warning":      "File produced no usable chunks after splitting.",
         }
 
-    # 3. Embed
-    client = get_openai(api_key)
+    # 3. Embed (Locally)
     texts = [c["text"] for c in chunks]
-    embeddings = embed_texts(client, texts)
+    embeddings = embed_texts(texts)
 
     # 4. Upsert to Qdrant
     qdrant = get_qdrant()
     points = []
+    
+    # Use original filename if provided, otherwise the basename of the file path
+    display_filename = original_filename if original_filename else pathlib.Path(file_path).name
+    
+    # Standardise metadata across all chunks before ingestion
+    # Import the title inference logic to keep it consistent
+    from hr_doc_loader import _infer_doc_title
+    display_title = _infer_doc_title(display_filename)
+
+    for c in chunks:
+        c["metadata"]["source_filename"] = display_filename
+        c["metadata"]["doc_title"]       = display_title
+        
     for chunk, embedding in zip(chunks, embeddings):
         if embedding is None:
             continue  # skip any failed embeddings
@@ -209,7 +213,7 @@ def ingest_file(file_path: str, api_key: str | None = None) -> dict:
                     "department":      m["department"],
                     "section_heading": m["section_heading"],
                     "page_number":     m["page_number"],
-                    "source_filename": m["source_filename"],
+                    "source_filename": display_filename,
                     "ingested_at":     m["ingested_at"],
                 },
             )
@@ -223,7 +227,7 @@ def ingest_file(file_path: str, api_key: str | None = None) -> dict:
     _rebuild_bm25(updated_corpus)
 
     return {
-        "filename":     chunks[0]["metadata"]["source_filename"],
+        "filename":     display_filename,
         "doc_title":    chunks[0]["metadata"]["doc_title"],
         "chunks_added": len(points),
     }

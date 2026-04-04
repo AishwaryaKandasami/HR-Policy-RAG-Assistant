@@ -26,10 +26,11 @@ INJECTION_KEYWORDS = [
 
 # Triggers for Human Escalation (Bypasses LLM)
 ESCALATION_KEYWORDS = [
-    "harassment", "bullying", "discrimination", "grievance", 
-    "hostile work environment", "misconduct", "disciplinary",
+    "harassment", "bullying", "discrimination", 
+    "hostile work environment", "misconduct",
     "report an employee", "sue", "legal action", "tribunal",
-    "am i being fired", "unfair dismissal", "gross misconduct"
+    "am i being fired", "unfair dismissal", "gross misconduct",
+    "charge for", "sue for", "litigation"
 ]
 
 # Out-of-Scope Topics

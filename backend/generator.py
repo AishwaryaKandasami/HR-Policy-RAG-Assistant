@@ -105,7 +105,8 @@ def generate_answer(
     query: str,
     retrieved_chunks: list[dict],
     model_alias: str = "groq_llama_8b",
-    api_key: Optional[str] = None
+    api_key: Optional[str] = None,
+    confidence_score: float = 0.0
 ) -> dict:
     """
     Main entry point for generating an HR policy answer.
@@ -155,7 +156,8 @@ def generate_answer(
         return {
             "answer": answer.strip(),
             "model_used": model_id,
-            "success": True
+            "success": True,
+            "confidence_score": confidence_score
         }
     except Exception as e:
         return {

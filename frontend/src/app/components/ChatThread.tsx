@@ -7,15 +7,24 @@ import {
   ChevronDown, 
   ChevronUp, 
   ExternalLink,
-  MessageSquare
+  MessageSquare,
+  CheckCircle2,
+  AlertTriangle,
+  AlertCircle,
+  ThumbsUp,
+  ThumbsDown,
+  Check
 } from 'lucide-react';
-import { QueryResponse } from '@/lib/api';
+import { QueryResponse, api } from '@/lib/api';
 
 interface Message {
   role: 'user' | 'bot';
   content: string;
   sources?: QueryResponse['sources'];
   status?: string;
+  confidence_score?: number;
+  confidence_label?: string;
+  query_id?: string;
 }
 
 interface ChatThreadProps {
@@ -61,6 +70,24 @@ export default function ChatThread({ messages, isLoading }: ChatThreadProps) {
 function MessageBubble({ message }: { message: Message }) {
   const isBot = message.role === 'bot';
   const [showSources, setShowSources] = useState(false);
+  const [feedback, setFeedback] = useState<'up' | 'down' | null>(null);
+  const [showReasons, setShowReasons] = useState(false);
+  const [isSubmitting, setIsSubmitting] = useState(false);
+
+  const handleFeedback = async (rating: 'up' | 'down', reason?: string) => {
+    if (!message.query_id || feedback) return;
+    
+    setIsSubmitting(true);
+    try {
+      await api.sendFeedback(message.query_id, rating, reason);
+      setFeedback(rating);
+      setShowReasons(false);
+    } catch (err) {
+      console.error("Feedback failed:", err);
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
 
   return (
     <div className={`flex gap-4 ${isBot ? 'bot-bubble pr-10' : 'user-bubble pl-10'} chat-bubble w-fit max-w-[85%]`}>
@@ -74,6 +101,71 @@ function MessageBubble({ message }: { message: Message }) {
         <div className={`whitespace-pre-wrap leading-relaxed ${isBot ? 'text-slate-700' : 'text-white'}`}>
           {message.content}
         </div>
+        
+        {isBot && message.confidence_label && (
+          <div className="flex flex-wrap items-center gap-3">
+            <ConfidencePill 
+              label={message.confidence_label} 
+              score={message.confidence_score || 0} 
+            />
+            
+            {message.query_id && !message.status && (
+              <div className="mt-3 flex items-center gap-1 border-l border-slate-200 pl-3">
+                <button 
+                  onClick={() => handleFeedback('up')}
+                  disabled={!!feedback || isSubmitting}
+                  className={`p-1.5 rounded-md transition-all ${
+                    feedback === 'up' 
+                      ? 'bg-emerald-50 text-emerald-600' 
+                      : 'text-slate-400 hover:text-emerald-500 hover:bg-emerald-50'
+                  } disabled:cursor-default`}
+                  title="Helpful"
+                >
+                  <ThumbsUp className={`w-3.5 h-3.5 ${feedback === 'up' ? 'fill-emerald-600' : ''}`} />
+                </button>
+                
+                <div className="relative">
+                  <button 
+                    onClick={() => {
+                      if (feedback) return;
+                      setShowReasons(!showReasons);
+                    }}
+                    disabled={!!feedback || isSubmitting}
+                    className={`p-1.5 rounded-md transition-all ${
+                      feedback === 'down' 
+                        ? 'bg-rose-50 text-rose-600' 
+                        : 'text-slate-400 hover:text-rose-500 hover:bg-rose-50'
+                    } disabled:cursor-default`}
+                    title="Not helpful"
+                  >
+                    <ThumbsDown className={`w-3.5 h-3.5 ${feedback === 'down' ? 'fill-rose-600' : ''}`} />
+                  </button>
+
+                  {showReasons && (
+                    <div className="absolute left-0 top-full mt-2 z-10 w-40 bg-white rounded-xl shadow-2xl border border-slate-100 p-1 animate-in zoom-in-95 duration-200">
+                      {["Wrong answer", "Incomplete", "Not what I meant"].map((reason) => (
+                        <button 
+                          key={reason}
+                          onClick={() => handleFeedback('down', reason)}
+                          className="w-full text-left px-3 py-2 text-[11px] font-medium text-slate-600 hover:bg-slate-50 hover:text-indigo-600 rounded-lg transition-colors flex items-center justify-between group"
+                        >
+                          {reason}
+                          <Check className="w-3 h-3 opacity-0 group-hover:opacity-100 transition-opacity" />
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                </div>
+
+                {feedback && (
+                  <span className="text-[10px] font-bold text-slate-400 ml-1 animate-in fade-in slide-in-from-left-1">
+                    Thanks!
+                  </span>
+                )}
+              </div>
+            )}
+          </div>
+        )}
 
         {isBot && message.sources && message.sources.length > 0 && (
           <div className="mt-4 pt-4 border-t border-slate-100">
@@ -105,6 +197,36 @@ function MessageBubble({ message }: { message: Message }) {
           </div>
         )}
       </div>
+    </div>
+  );
+}
+
+function ConfidencePill({ label, score }: { label: string, score: number }) {
+  const isHigh = label.toLowerCase() === 'high';
+  const isMedium = label.toLowerCase() === 'medium';
+  const isLow = label.toLowerCase() === 'low';
+
+  const styles = {
+    high: "bg-emerald-50 text-emerald-700 border-emerald-200",
+    medium: "bg-amber-50 text-amber-700 border-amber-200",
+    low: "bg-rose-50 text-rose-700 border-rose-200",
+  };
+
+  const currentStyle = isHigh ? styles.high : isMedium ? styles.medium : styles.low;
+  
+  return (
+    <div className={`mt-3 inline-flex items-center gap-1.5 px-2 py-1 rounded-md border text-[10px] font-bold uppercase tracking-tight ${currentStyle} animate-in fade-in slide-in-from-left-2 duration-500`}>
+      {isHigh && <CheckCircle2 className="w-3 h-3" />}
+      {isMedium && <AlertTriangle className="w-3 h-3" />}
+      {isLow && <AlertCircle className="w-3 h-3" />}
+      
+      <span>Confidence: {label} ({Math.round(score * 100)}%)</span>
+      
+      {isLow && (
+        <span className="ml-1 pl-1.5 border-l border-rose-200 text-rose-800">
+          Verify with HR.
+        </span>
+      )}
     </div>
   );
 }
