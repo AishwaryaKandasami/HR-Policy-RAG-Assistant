@@ -1,0 +1,19 @@
+# Annual Leave & Holiday Policy — [Demo Doc 3]
+==============================================
+
+## 1. Statutory Entitlement
+Full-time employees are entitled to 5.6 weeks (28 days) of paid holiday per year.
+- This includes bank holidays.
+- Part-time employees have a pro-rata entitlement.
+
+## 2. Holiday Pay Calculations
+During your holiday, you should receive the same pay as if you were working.
+- This includes regular overtime, commission, and bonuses.
+- Pay is calculated on the average weekly earnings over the previous 52 weeks.
+
+## 3. Booking Leave
+- You must give at least twice as much notice as the length of the holiday.
+- Example: 2 weeks notice for a 1-week holiday.
+- Your manager can refuse a holiday request as long as they provide notice.
+
+[Source: UK Working Time Regulations — Oct 2024]

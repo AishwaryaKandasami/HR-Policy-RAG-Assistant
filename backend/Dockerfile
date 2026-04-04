@@ -23,7 +23,7 @@ RUN pip install --no-cache-dir -r requirements.txt
 
 # Step 6: Copy the backend source code and demo docs
 COPY . .
-COPY ../demo_docs ./demo_docs
+COPY ./demo_docs ./demo_docs
 
 # Step 7: Expose the port that the app runs on (FastAPI default)
 EXPOSE 8000

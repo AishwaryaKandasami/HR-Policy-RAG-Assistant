@@ -68,7 +68,11 @@ class FeedbackRequest(BaseModel):
 
 # ── Startup: pre-load demo docs ────────────────────────────────────
 
-DEMO_DOCS_DIR = pathlib.Path(__file__).parent.parent / "demo_docs"
+# Support both local dev (../demo_docs) and Docker/HF Space (./demo_docs)
+DEMO_DOCS_DIR = pathlib.Path(__file__).parent / "demo_docs"
+if not DEMO_DOCS_DIR.exists():
+    DEMO_DOCS_DIR = pathlib.Path(__file__).parent.parent / "demo_docs"
+
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "")
 EMBED_DIMS = 384  # Match all-MiniLM-L6-v2
 
