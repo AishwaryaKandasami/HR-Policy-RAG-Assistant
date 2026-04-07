@@ -336,7 +336,7 @@ def ingest_file(file_path: str, api_key: str | None = None, original_filename: s
 
     return {
         "filename":     display_filename,
-        "doc_title":    chunks[0]["metadata"]["doc_title"],
+        "doc_title":    display_title,
         "chunks_added": len(points),
     }
 
