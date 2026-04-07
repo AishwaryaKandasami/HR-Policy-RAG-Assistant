@@ -21,16 +21,23 @@ PHONE_PATTERN  = re.compile(r"\b(?:\+44|0)[\d\s\-]{9,}\b")
 INJECTION_KEYWORDS = [
     "ignore previous instructions", "system prompt", "dan mode", 
     "jailbreak", "forget your persona", "disregard all rules",
-    "developer mode", "override instructions"
+    "developer mode", "override instructions", "act as", "roleplay",
+    "you are now", "translator"
+]
+INJECTION_TAG_PATTERN = re.compile(r"\[(?:SYSTEM|USER|INSTRUCTION|ASSISTANT|ADMIN)\]", re.IGNORECASE)
+
+# Keywords that indicate a query is about a personal situation rather than general policy.
+PERSONAL_INTENT_KEYWORDS = [
+    "my manager", "my boss", "what should i do", "what do i do", 
+    "i have received", "i am being", "i was told", "my situation", 
+    "my case", "my warning", "my dismissal", "advise me", "help me with my"
 ]
 
-# Triggers for Human Escalation (Bypasses LLM)
-ESCALATION_KEYWORDS = [
-    "harassment", "bullying", "discrimination", 
-    "hostile work environment", "misconduct",
-    "report an employee", "sue", "legal action", "tribunal",
-    "am i being fired", "unfair dismissal", "gross misconduct",
-    "charge for", "sue for", "litigation"
+# Sensitive HR topics that might require human escalation if framed personally.
+SENSITIVE_TOPICS = [
+    "harassment", "bullying", "discrimination", "misconduct",
+    "hostile work environment", "sue", "legal action", "tribunal",
+    "disciplinary", "grievance", "dismissal", "fired", "litigation"
 ]
 
 # Out-of-Scope Topics
@@ -61,12 +68,33 @@ def _check_pii(query: str) -> Optional[str]:
 
 def _check_injection(query: str) -> bool:
     q = query.lower()
-    return any(k in q for k in INJECTION_KEYWORDS)
+    if any(k in q for k in INJECTION_KEYWORDS):
+        return True
+    if INJECTION_TAG_PATTERN.search(query):
+        return True
+    return False
 
 
-def _check_escalation(query: str) -> bool:
+def _check_personal_situational(query: str) -> bool:
+    """
+    Returns True if the query appears to be a personal situational request.
+    Logic: Presence of personal intent markers (my, I am, etc.) 
+    combined with sensitive topics OR specific advice requests.
+    """
     q = query.lower()
-    return any(k in q for k in ESCALATION_KEYWORDS)
+    
+    # Direct advice requests or personal manager references are always situational
+    if any(k in q for k in PERSONAL_INTENT_KEYWORDS):
+        return True
+        
+    # Sensitive topics are situational ONLY if they don't look like general definitions.
+    has_sensitive_topic = any(k in q for k in SENSITIVE_TOPICS)
+    is_general_definition = any(q.startswith(prefix) for prefix in ["what is", "what are", "define", "difference between"])
+    
+    if has_sensitive_topic and not is_general_definition:
+        return True
+        
+    return False
 
 
 def _check_out_of_scope(query: str) -> bool:
@@ -96,15 +124,15 @@ def classify_query(query: str) -> GuardrailResult:
             "message": f"I'm sorry, for privacy reasons you must not include personal data like {pii_reason.lower()}"
         }
 
-    # 3. Sensitive Escalation (Human HR required)
-    if _check_escalation(query):
+    # 3. Sensitive Escalation / Personal Situation (Human HR required)
+    if _check_personal_situational(query):
         return {
             "status": "ESCALATE",
-            "reason": "Sensitive Topic",
+            "reason": "Personal/Sensitive Topic",
             "message": (
-                "For matters involving harassment, grievances, or legal action, "
-                "this chatbot cannot provide specific advice. Please contact your "
-                "HR Business Partner directly to open a formal case."
+                "For specific situations regarding your individual circumstances, "
+                "active grievances, or your manager, this chatbot cannot provide advice. "
+                "Please contact your HR Business Partner directly to open a formal case."
             )
         }
 

@@ -134,8 +134,11 @@ def generate_answer(
     user_msg = (
         f"CONTEXT FROM HR DOCUMENTS:\n{context_block}\n\n"
         f"USER QUESTION: {query}\n\n"
-        f"INSTRUCTIONS: Answer the user's question using the provided context only. "
-        f"Cite your sources precisely in [Source: Title, Section, Page] format."
+        f"INSTRUCTIONS:\n"
+        f"1. Answer the user's question using the provided context only.\n"
+        f"2. Use clean, objective prose. NO personal framing ('you should', 'if you are').\n"
+        f"3. NO inline citations. Place all sources in a 'Sources' block at the very bottom.\n"
+        f"4. If the question involves personal advice or active disputes, provide only the policy facts and refer them to their HRBP."
     )
 
     # 2. Route to provider
