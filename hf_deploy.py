@@ -1,5 +1,8 @@
 import os
 from huggingface_hub import HfApi
+from dotenv import load_dotenv
+
+load_dotenv()
 
 api = HfApi(token=os.getenv("HUGGINGFACE_TOKEN"))
 repo_id = "AishwaryaKa/hr-policy-bot"
