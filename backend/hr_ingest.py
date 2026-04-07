@@ -56,8 +56,8 @@ def get_qdrant() -> QdrantClient:
     """Return (and lazily initialise) the Qdrant Cloud or in-memory client."""
     global _qdrant_client
     if _qdrant_client is None:
-        url = os.getenv("QDRANT_URL")
-        api_key = os.getenv("QDRANT_API_KEY")
+        url = os.getenv("QDRANT_URL", "").strip()
+        api_key = os.getenv("QDRANT_API_KEY", "").strip()
 
         if url and api_key:
             print(f"📡 Connecting to Qdrant Cloud at {url}...")

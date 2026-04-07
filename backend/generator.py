@@ -191,7 +191,7 @@ def judge_answer(query: str, answer: str, retrieved_chunks: list[dict], model_al
     def _get_env_key(keys: list[str]) -> Optional[str]:
         for k in keys:
             val = os.getenv(k)
-            if val: return val
+            if val: return val.strip()
         return None
 
     api_key_gemini = _get_env_key(["GOOGLE_API_KEY", "GEMINI_API_KEY", "gemini_api_key"])
@@ -252,7 +252,7 @@ def rewrite_query(original_query: str, model_alias: str = "groq_llama_8b") -> st
     def _get_env_key(keys: list[str]) -> Optional[str]:
         for k in keys:
             val = os.getenv(k)
-            if val: return val
+            if val: return val.strip()
         return None
 
     api_key_gemini = _get_env_key(["GOOGLE_API_KEY", "GEMINI_API_KEY", "gemini_api_key"])
