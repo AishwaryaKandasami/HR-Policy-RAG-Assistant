@@ -27,6 +27,7 @@ from qdrant_client.models import (
     FieldCondition,
     Filter,
     MatchValue,
+    PayloadSchemaType,
     PointStruct,
     VectorParams,
 )
@@ -75,6 +76,15 @@ def get_qdrant() -> QdrantClient:
                 collection_name=COLLECTION_NAME,
                 vectors_config=VectorParams(size=EMBED_DIMS, distance=Distance.COSINE),
             )
+            # Create a Payload Index (Required by Qdrant Cloud for filters)
+            _qdrant_client.create_payload_index(
+                collection_name=COLLECTION_NAME,
+                field_name="source_filename",
+                field_schema=PayloadSchemaType.KEYWORD,
+            )
+        except Exception:
+            # If it already exists or index exists, this might fail, which is fine
+            pass
     return _qdrant_client
 
 
