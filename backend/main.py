@@ -82,9 +82,19 @@ SUPPORTED_EXTENSIONS = {".pdf", ".docx", ".txt", ".md"}
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """
-    On startup: ingest all PDFs from demo_docs/ if available.
-    Uses free local embeddings by default.
+    On startup: 
+    1. Sync the BM25 index from Qdrant Cloud (persistence).
+    2. Ingest demo PDFs if this is a fresh setup.
     """
+    from hr_ingest import sync_bm25_from_cloud
+    
+    # 1. Persistence Sync
+    try:
+        sync_bm25_from_cloud()
+    except Exception as e:
+        print(f"⚠️  Cloud sync failed: {e}. Starting with empty session.")
+
+    # 2. Pre-load demo docs
     if DEMO_DOCS_DIR.exists():
         demo_files = sorted(DEMO_DOCS_DIR.glob("*"))
         eligible = [f for f in demo_files if f.suffix.lower() in SUPPORTED_EXTENSIONS]
@@ -278,64 +288,110 @@ async def query_hr_bot(request: QueryRequest):
             query_id=query_id
         )
 
-    # 2. Embed Query (Locally using SentenceTransformer)
-    try:
-        qdrant = get_qdrant()
-        embed_model = get_embed_model()
-        query_vector = embed_model.encode(request.query).tolist()
-    except Exception as e:
-        raise HTTPException(status_code=400, detail=f"Embedding error: {str(e)}")
+    # ── Self-Correction Loop (Max 2 Attempts) ──────────────────────
+    from generator import judge_answer, rewrite_query
+    
+    current_human_query = request.query
+    current_search_query = request.query
+    attempts_data = []
+    final_gen_result = None
+    final_retrieved_chunks = []
+    final_confidence_score = 0.0
 
-    # 3. Hybrid Retrieve (Qdrant + BM25 + RRF + Rerank)
-    try:
-        retrieval_data = retrieve(
-            query_text=request.query,
-            query_vector=query_vector,
-            top_k=3
+    for i in range(1, 3):
+        print(f"🔍 Attempt {i} | Search Query: '{current_search_query}'")
+        
+        # 2. Embed Search Query
+        try:
+            embed_model = get_embed_model()
+            query_vector = embed_model.encode(current_search_query).tolist()
+        except Exception as e:
+            raise HTTPException(status_code=400, detail=f"Embedding error: {str(e)}")
+
+        # 3. Hybrid Retrieve
+        try:
+            retrieval_data = retrieve(
+                query_text=current_search_query,
+                query_vector=query_vector,
+                top_k=3
+            )
+            retrieved_chunks = retrieval_data["chunks"]
+            confidence_score = retrieval_data["confidence_score"]
+        except Exception as e:
+            raise HTTPException(status_code=500, detail=f"Retrieval error: {str(e)}")
+
+        if not retrieved_chunks:
+            print(f"  ⚠️ No chunks found for '{current_search_query}'")
+            if i == 1:
+                current_search_query = rewrite_query(current_human_query)
+                continue
+            else:
+                final_gen_result = {"answer": "I'm sorry, I couldn't find any documents related to your question.", "model_used": "none"}
+                break
+
+        # 4. Generate Answer
+        gen_result = generate_answer(
+            query=current_human_query,
+            retrieved_chunks=retrieved_chunks,
+            model_alias=request.llm_provider,
+            api_key=request.provider_api_key or request.openai_api_key,
+            confidence_score=confidence_score
         )
-        retrieved_chunks = retrieval_data["chunks"]
-        confidence_score = retrieval_data["confidence_score"]
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Retrieval error: {str(e)}")
+        
+        # 5. Judge Answer
+        is_pass, judge_reason = judge_answer(current_human_query, gen_result["answer"], retrieved_chunks)
+        
+        # Update trackers for possible final output
+        final_gen_result = gen_result
+        final_retrieved_chunks = retrieved_chunks
+        final_confidence_score = confidence_score
 
-    # 4. Generate Answer (Selected LLM)
-    gen_result = generate_answer(
-        query=request.query,
-        retrieved_chunks=retrieved_chunks,
-        model_alias=request.llm_provider,
-        api_key=request.provider_api_key or request.openai_api_key,
-        confidence_score=confidence_score
-    )
+        if is_pass:
+            print(f"  ✅ Attempt {i} PASSED judgment.")
+            break
+        else:
+            print(f"  ❌ Attempt {i} FAILED judgment: {judge_reason}")
+            if i == 1:
+                # Expand query for more context
+                current_search_query = rewrite_query(current_human_query)
+            else:
+                # Final refusal logic
+                final_gen_result["answer"] = (
+                    "I found some related information, but I couldn't verify it with enough "
+                    "certainty to provide a reliable HR answer. Please contact HR directly. "
+                    f"(Reason: {judge_reason})"
+                )
+                break
 
     latency = (time.perf_counter() - start_time) * 1000
 
-    # 5. Log Result
+    # 6. Log Result (using the original user query)
     log_interaction(
         query_id=query_id,
         query=request.query,
-        answer=gen_result.get("answer", ""),
-        sources=retrieved_chunks,
-        llm_used=gen_result.get("model_used", "none"),
+        answer=final_gen_result.get("answer", ""),
+        sources=final_retrieved_chunks,
+        llm_used=final_gen_result.get("model_used", "none"),
         blocked=False,
         escalated=False,
         latency_ms=latency
     )
 
-    # 5. Determine Confidence Label
-    if confidence_score > 0.7:
+    # 7. Determine Confidence Label
+    if final_confidence_score > 0.7:
         confidence_label = "High"
-    elif confidence_score >= 0.4:
+    elif final_confidence_score >= 0.4:
         confidence_label = "Medium"
     else:
         confidence_label = "Low"
 
     return QueryResponse(
-        answer=gen_result["answer"],
-        sources=[c["metadata"] for c in retrieved_chunks],
-        llm_used=gen_result["model_used"],
+        answer=final_gen_result["answer"],
+        sources=[c["metadata"] for c in final_retrieved_chunks],
+        llm_used=final_gen_result["model_used"],
         success=True,
         status="PASS",
-        confidence_score=confidence_score,
+        confidence_score=final_confidence_score,
         confidence_label=confidence_label,
         latency_ms=latency,
         query_id=query_id

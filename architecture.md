@@ -13,11 +13,11 @@
 |---|---|---|
 | **Frontend** | Next.js → Vercel | Free |
 | **Backend** | FastAPI → Hugging Face Spaces (Docker) | Free |
-| **Vector DB** | Qdrant `:memory:` — session-based | Free |
-| **Sparse Search** | rank-bm25 — in-memory | Free |
-| **Embeddings** | OpenAI `text-embedding-3-small` (768-d) | Client API key |
+| **Vector DB** | **Qdrant Cloud (Free Tier)** — persistent | Free |
+| **Sparse Search** | rank-bm25 — in-memory (synced from cloud) | Free |
+| **Embeddings** | `all-MiniLM-L6-v2` (384-d) — local | Free |
 | **Reranker** | `cross-encoder/ms-marco-MiniLM-L-6-v2` | Free (local model) |
-| **LLM** | Groq / Gemini / OpenAI — client provides API key | Free (client key) |
+| **LLM Router** | Groq / Gemini / OpenAI — client provides API key | Free (client key) |
 | **Demo docs** | 8 ACAS/CIPD PDFs — pre-loaded at startup | Free |
 | **Total** | | **£0** |
 
@@ -47,37 +47,34 @@ Anyone in the world (employee / HR manager / prospect)
 │   POST /ingest      POST /query      GET /logs          │
 │        │                 │               │              │
 │        ▼                 ▼               ▼              │
-│   ┌─────────┐    ┌──────────────┐  ┌──────────┐       │
-│   │  Doc    │    │  HR          │  │  Audit   │       │
-│   │  Parser │    │  Guardrails  │  │  Log CSV │       │
-│   │+Chunker │    │  (pre-filter)│  └──────────┘       │
-│   └────┬────┘    └──────┬───────┘                     │
-│        │                │ PASS                         │
-│        ▼                ▼                              │
-│   ┌─────────┐    ┌──────────────────────────────────┐  │
-│   │Embedder │    │       HYBRID RETRIEVAL           │  │
-│   │(OpenAI) │    │                                  │  │
-│   └────┬────┘    │  ┌─────────────┐ ┌────────────┐  │  │
-│        │         │  │ Dense ANN   │ │ BM25       │  │  │
-│        ▼         │  │ (Qdrant)    │ │ (rank-bm25)│  │  │
-│   ┌─────────┐    │  └──────┬──────┘ └─────┬──────┘  │  │
-│   │ Qdrant  │◄───┘         │              │          │  │
-│   │:memory: │         RRF Score Fusion    │          │  │
-│   └─────────┘              └──────┬───────┘          │  │
-│                                   │                   │  │
-│                     Cross-Encoder Reranker            │  │
-│                                   │ top-3 chunks      │  │
-│                                   ▼                   │  │
-│                         ┌─────────────────┐           │  │
-│                         │   LLM ROUTER    │           │  │
-│                         │ Groq / Gemini / │           │  │
-│                         │ OpenAI          │           │  │
-│                         └────────┬────────┘           │  │
-│                                  │ answer + citation   │  │
-└──────────────────────────────────┼─────────────────────┘
-                                   ▼
-                    Frontend renders answer card
-                    + collapsible source citation
+│   ┌─────────┐      RETRY LOOP (max 2)    ┌──────────┐    │
+│   │Markdown │    ┌──────────────────┐    │  Audit   │    │
+│   │Parser   │    │  HR Guardrails   │    │  Log CSV │    │
+│   │+Chunker │    └────────┬─────────┘    └──────────┘    │
+│   └────┬────┘             │ PASS                         │
+│        │                  ▼                              │
+│   ┌─────────┐    ┌──────────────────────────────────┐    │
+│   │Embedder │    │       HYBRID RETRIEVAL           │    │
+│   │(local)  │    │ (Qdrant Cloud + In-memory BM25)  │    │
+│   └────┬────┘    └────────────────┬─────────────────┘    │
+│        │                          │                      │
+│        ▼                ┌─────────┴─────────┐            │
+│   ┌─────────┐           │ RRF Score Fusion  │            │
+│   │ Qdrant  │           └─────────┬─────────┘            │
+│   │ Cloud   │◄──────────┤  Cross-Encoder    │            │
+│   └─────────┘           └─────────┬─────────┘            │
+│                                   │                      │
+│                         ┌─────────▼─────────┐            │
+│                         │   LLM GENERATOR   │            │
+│                         └─────────┬─────────┘            │
+│                                   │ answer               │
+│                         ┌─────────▼─────────┐            │
+│                         │   LLM JUDGE       │            │
+│                         └─────────┬─────────┘            │
+│                FAIL (retry) ◄─────┴─────► PASS (return)  │
+└──────────────────────┬────────────────────┬──────────────┘
+                       │                    │
+                Rewrite Query        Frontend renders answer
 ```
 
 ### Offline Ingestion Pipeline
@@ -85,21 +82,21 @@ Anyone in the world (employee / HR manager / prospect)
 ```
 User uploads file (PDF / DOCX / TXT)   OR   Demo docs pre-loaded at startup
         │
-        ├── .pdf  → pdfplumber   → text per page
-        ├── .docx → python-docx  → paragraphs + headings
+        ├── .pdf  → pdfplumber   → Unified Markdown
+        ├── .docx → python-docx  → Unified Markdown
         └── .txt / .md → direct read
         │
         ▼
-RecursiveCharacterTextSplitter
-  chunk_size=600 chars, overlap=80 chars
+MarkdownHeaderTextSplitter
+  split by headings (#, ##) -> ensures semantic integrity
         │
         ▼
 Metadata per chunk:
   { doc_title, doc_type, department, section_heading, page_number,
     source_filename, ingested_at }
         │
-        ├──► OpenAI text-embedding-3-small → Qdrant :memory: (dense)
-        └──► rank-bm25 index update (sparse, in-memory)
+        ├──► Local all-MiniLM-L6-v2 → Qdrant Cloud (dense persistence)
+        └──► Rebuild BM25 index from cloud vectors on startup (sparse)
 ```
 
 ---
@@ -198,16 +195,13 @@ Step  Component             Action                              Result
 ────  ────────────────────  ──────────────────────────────────  ─────────────────────────────────
  1    Next.js UI            User types question                 POST /query
  2    HR Guardrails         No PII, no injection, not sensitive PASS → retrieve
- 3    OpenAI Embedding      Encode query → 768-d vector         query_vector: float[768]
- 4    Qdrant Dense          ANN search — top-10 chunks          semantic matches
+ 3    Local Embedding       Encode query → 384-d vector         query_vector: float[384]
+ 4    Qdrant Cloud          ANN search — top-10 chunks          semantic matches
  5    BM25 Sparse           Keyword search — top-10 chunks      "holiday", "annual leave" matches
  6    RRF Fusion            Merge + re-score both lists         top-10 fused
  7    Cross-Encoder         Rerank → top-3                      best: "28 days statutory minimum..."
- 8    LLM Router            HR system prompt + context + query  "Full-time employees are entitled
-                                                                to 28 days annual leave including
-                                                                bank holidays. (Holiday Entitlement
-                                                                Guide, Section 2)"
- 9    Post-Filter           Grounding check ✓                   PASS
+ 8    LLM Generator         HR system prompt + context + query  Generated Answer
+ 9    LLM Judge             Verify: Faithfulness + Relevance    PASS
 10    Audit Log             Append row to session CSV           logged
 11    Next.js UI            Render answer card + source link    Employee sees cited answer
 ```
@@ -276,10 +270,10 @@ timestamp, query, answer_preview, doc_title, section, page, llm_used, blocked, b
 
 | Component | File | Description |
 |---|---|---|
-| Document parser | `hr_doc_loader.py` | Extracts text from PDF, DOCX, TXT. Attaches metadata per chunk. |
-| Ingestion pipeline | `hr_ingest.py` | Chunks text, embeds with OpenAI, upserts to Qdrant and BM25 index. |
-| Embeddings | OpenAI `text-embedding-3-small` | 768-d dense vectors for semantic search. |
-| Vector store | Qdrant `:memory:` | Holds embedded HR doc chunks for the session. Collection: `hr_docs`. |
+| Document parser | `hr_doc_loader.py` | Extracts text from PDF, DOCX, TXT into structured Markdown. |
+| Ingestion pipeline | `hr_ingest.py` | Header-aware split, local embed, upserts to Qdrant Cloud. |
+| Embeddings | `all-MiniLM-L6-v2` | 384-d local dense vectors (no API cost). |
+| Vector store | Qdrant Cloud | Persistent cloud storage for HR doc chunks. |
 | Sparse search | `rank-bm25` in-memory index | Keyword match for exact HR terms (SSP, TUPE, IR35, ACAS). |
 | Retriever | `retriever.py` | Dense ANN + BM25 → RRF fusion → cross-encoder rerank → top-3. |
 | Reranker | `cross-encoder/ms-marco-MiniLM-L-6-v2` | Local model, scores top-10 fused chunks to return best top-3. |

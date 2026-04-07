@@ -17,7 +17,7 @@ import uuid
 from typing import Optional
 
 from dotenv import load_dotenv
-from langchain_text_splitters import RecursiveCharacterTextSplitter
+from langchain_text_splitters import MarkdownHeaderTextSplitter, RecursiveCharacterTextSplitter
 from openai import OpenAI
 from qdrant_client import QdrantClient
 from sentence_transformers import SentenceTransformer
@@ -31,14 +31,14 @@ from qdrant_client.models import (
 )
 from rank_bm25 import BM25Okapi
 
-from hr_doc_loader import load_document
+from hr_doc_loader import load_document_to_markdown, _infer_doc_title, _infer_doc_type
 
 # ── Config ────────────────────────────────────────────────────────
 COLLECTION_NAME = "hr_docs"
 EMBED_MODEL     = "all-MiniLM-L6-v2"
 EMBED_DIMS      = 384
-CHUNK_SIZE      = 600   # characters
-CHUNK_OVERLAP   = 80
+CHUNK_SIZE      = 800   # slightly larger for context
+CHUNK_OVERLAP   = 100
 BATCH_SIZE      = 32    # Local batch size
 
 # ── Module-level singletons ────────────────────────────────────────
@@ -52,14 +52,28 @@ _bm25_corpus: list[dict] = []   # [{text, metadata}] — parallel to BM25 tokeni
 # ── Initialisation helpers ─────────────────────────────────────────
 
 def get_qdrant() -> QdrantClient:
-    """Return (and lazily initialise) the Qdrant in-memory client."""
+    """Return (and lazily initialise) the Qdrant Cloud or in-memory client."""
     global _qdrant_client
     if _qdrant_client is None:
-        _qdrant_client = QdrantClient(":memory:")
-        _qdrant_client.create_collection(
-            collection_name=COLLECTION_NAME,
-            vectors_config=VectorParams(size=EMBED_DIMS, distance=Distance.COSINE),
-        )
+        url = os.getenv("QDRANT_URL")
+        api_key = os.getenv("QDRANT_API_KEY")
+
+        if url and api_key:
+            print(f"📡 Connecting to Qdrant Cloud at {url}...")
+            _qdrant_client = QdrantClient(url=url, api_key=api_key)
+        else:
+            print("💡 QDRANT_URL/API_KEY not found. Falling back to in-memory mode (session-scoped).")
+            _qdrant_client = QdrantClient(":memory:")
+
+        # Ensure collection exists
+        try:
+            _qdrant_client.get_collection(COLLECTION_NAME)
+        except Exception:
+            print(f"🛠️ Creating collection '{COLLECTION_NAME}'...")
+            _qdrant_client.create_collection(
+                collection_name=COLLECTION_NAME,
+                vectors_config=VectorParams(size=EMBED_DIMS, distance=Distance.COSINE),
+            )
     return _qdrant_client
 
 
@@ -90,31 +104,108 @@ def get_bm25() -> tuple[Optional[BM25Okapi], list[dict]]:
     return _bm25_index, _bm25_corpus
 
 
+def sync_bm25_from_cloud() -> int:
+    """
+    On startup: scroll through all points in Qdrant Cloud to 
+    populate the in-memory BM25 index. This ensures persistence without 
+    storing raw local files.
+    """
+    global _bm25_corpus
+    qdrant = get_qdrant()
+    
+    print("🔄 Syncing BM25 index from Qdrant Cloud...")
+    
+    # Scroll through all points
+    all_chunks = []
+    offset = None
+    
+    while True:
+        points, offset = qdrant.scroll(
+            collection_name=COLLECTION_NAME,
+            limit=100,
+            with_payload=True,
+            with_vectors=False,
+            offset=offset
+        )
+        
+        for p in points:
+            all_chunks.append({
+                "text": p.payload.get("chunk_text", ""),
+                "metadata": {k: v for k, v in p.payload.items() if k != "chunk_text"}
+            })
+            
+        if offset is None:
+            break
+            
+    if all_chunks:
+        _rebuild_bm25(all_chunks)
+        print(f"  ✅ Synced {len(all_chunks)} chunks into BM25 index.")
+    else:
+        print("  ℹ️ No documents found in cloud storage.")
+        
+    return len(all_chunks)
+
+
+def check_doc_exists(filename: str) -> bool:
+    """
+    Check if any chunks for this filename already exist in Qdrant.
+    Used to skip re-ingestion of demo docs on every restart.
+    """
+    qdrant = get_qdrant()
+    # Scroll with a limit of 1 to see if at least one point exists
+    res, _ = qdrant.scroll(
+        collection_name=COLLECTION_NAME,
+        scroll_filter=Filter(
+            must=[FieldCondition(key="source_filename", match=MatchValue(value=filename))]
+        ),
+        limit=1,
+        with_payload=False,
+        with_vectors=False
+    )
+    return len(res) > 0
+
+
 # ── Core pipeline functions ────────────────────────────────────────
 
-def chunk_records(records: list[dict]) -> list[dict]:
+def chunk_markdown(md_text: str, metadata_base: dict) -> list[dict]:
     """
-    Split page/section records into overlapping chunks.
-    Metadata is preserved on every chunk.
+    Split a structured Markdown string into chunks based on headers,
+    then sub-split long sections by character count.
     """
-    splitter = RecursiveCharacterTextSplitter(
+    headers_to_split_on = [
+        ("#", "Header 1"),
+        ("##", "Header 2"),
+        ("###", "Header 3"),
+    ]
+    
+    # 1. Split by headers
+    md_splitter = MarkdownHeaderTextSplitter(headers_to_split_on=headers_to_split_on)
+    sections = md_splitter.split_text(md_text)
+    
+    # 2. Sub-split long sections
+    char_splitter = RecursiveCharacterTextSplitter(
         chunk_size=CHUNK_SIZE,
-        chunk_overlap=CHUNK_OVERLAP,
-        length_function=len,
-        separators=["\n\n", "\n", ". ", " ", ""],
+        chunk_overlap=CHUNK_OVERLAP
     )
-    chunks = []
-    for rec in records:
-        texts = splitter.split_text(rec["page_content"])
+    
+    final_chunks = []
+    for sec in sections:
+        # Merge section headers into a single section heading string
+        section_heading = " > ".join([
+            sec.metadata.get(h[1], "") for h in headers_to_split_on if h[1] in sec.metadata
+        ]) or "General"
+        
+        texts = char_splitter.split_text(sec.page_content)
         for i, text in enumerate(texts):
-            chunks.append({
+            final_chunks.append({
                 "text": text,
                 "metadata": {
-                    **rec["metadata"],
-                    "chunk_index": i,
-                },
+                    **metadata_base,
+                    "section_heading": section_heading,
+                    "chunk_index": i
+                }
             })
-    return chunks
+    return final_chunks
 
 
 def embed_texts(texts: list[str]) -> list[list[float]]:
@@ -158,24 +249,42 @@ def ingest_file(file_path: str, api_key: str | None = None, original_filename: s
         "chunks_added": int,
       }
     """
-    # 1. Parse
-    records = load_document(file_path)
-    if not records:
+    # 0. Check for duplicates
+    display_filename = original_filename if original_filename else pathlib.Path(file_path).name
+    if check_doc_exists(display_filename):
+        print(f"  ⏭️  Skipping {display_filename} (already in cloud store).")
         return {
-            "filename":     file_path,
-            "doc_title":    "Unknown",
+            "filename":     display_filename,
+            "doc_title":    "Already Ingested",
             "chunks_added": 0,
-            "warning":      "No text could be extracted from this file.",
+            "skipped":      True
         }
 
-    # 2. Chunk
-    chunks = chunk_records(records)
+    # 1. Parse to Markdown
+    md_text = load_document_to_markdown(file_path)
+    if not md_text or len(md_text.strip()) < 20:
+        return {
+            "filename":     display_filename,
+            "doc_title":    "Empty",
+            "chunks_added": 0,
+            "warning":      "No text could be extracted.",
+        }
+
+    # 2. Chunk (Header-Aware)
+    metadata_base = {
+        "doc_title":       _infer_doc_title(display_filename),
+        "doc_type":        _infer_doc_type(display_filename),
+        "department":      "All",
+        "ingested_at":     datetime.now(timezone.utc).isoformat(),
+        "source_filename": display_filename
+    }
+    chunks = chunk_markdown(md_text, metadata_base)
     if not chunks:
         return {
-            "filename":     file_path,
-            "doc_title":    records[0]["metadata"]["doc_title"],
+            "filename":     display_filename,
+            "doc_title":    metadata_base["doc_title"],
             "chunks_added": 0,
-            "warning":      "File produced no usable chunks after splitting.",
+            "warning":      "No usable chunks produced.",
         }
 
     # 3. Embed (Locally)

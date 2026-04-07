@@ -164,3 +164,113 @@ def generate_answer(
             "answer": f"Generation Error ({provider}): {str(e)}",
             "success": False
         }
+# ── Evaluation & Refinement ────────────────────────────────────────
+
+def judge_answer(query: str, answer: str, retrieved_chunks: list[dict], model_alias: str = "gemini_flash") -> tuple[bool, str]:
+    """
+    Acts as the "LLM-as-a-Judge". 
+    Evaluates faithfulness and relevance before returning to the user.
+    """
+    # 1. Load judge prompt
+    judge_prompt_path = os.path.join(os.path.dirname(__file__), "judge_system_prompt.txt")
+    try:
+        with open(judge_prompt_path, "r", encoding="utf-8") as f:
+            system_msg = f.read()
+    except FileNotFoundError:
+        return True, "Judge prompt not found; skipping check."
+
+    # 2. Format context for judgment
+    context_msg = _format_context(retrieved_chunks)
+    user_msg = (
+        f"USER QUERY: {query}\n\n"
+        f"GENERATED ANSWER: {answer}\n\n"
+        f"SOURCE CONTEXT:\n{context_msg}"
+    )
+
+    # 3. Call judge (Gemini preferred)
+    def _get_env_key(keys: list[str]) -> Optional[str]:
+        for k in keys:
+            val = os.getenv(k)
+            if val: return val
+        return None
+
+    api_key_gemini = _get_env_key(["GOOGLE_API_KEY", "GEMINI_API_KEY", "gemini_api_key"])
+    api_key_openai = _get_env_key(["OPENAI_API_KEY", "openai_api_key"])
+    api_key_groq   = _get_env_key(["GROQ_API_KEY", "groq_api_key"])
+
+    env_keys = {
+        "gemini": api_key_gemini,
+        "openai": api_key_openai,
+        "groq":   api_key_groq,
+    }
+    
+    # Try to find a key for the judge
+    judge_provider = MODEL_MAP.get(model_alias, {}).get("provider", "gemini")
+    api_key = env_keys.get(judge_provider)
+    
+    if not api_key:
+        return True, "Missing Judge API key; skipping check."
+
+    try:
+        if judge_provider == "gemini":
+            raw_eval = _call_gemini(MODEL_MAP[model_alias]["id"], api_key, system_msg, user_msg)
+        elif judge_provider == "groq":
+             raw_eval = _call_groq(MODEL_MAP[model_alias]["id"], api_key, system_msg, user_msg)
+        else:
+             raw_eval = _call_openai(MODEL_MAP[model_alias]["id"], api_key, system_msg, user_msg)
+
+        # Parse result
+        is_pass = "[RESULT] PASS" in raw_eval.upper()
+        reason = "Passed verification."
+        if not is_pass:
+            # Extract reason if possible
+            if "[REASON]" in raw_eval:
+                reason = raw_eval.split("[REASON]")[1].strip()
+            else:
+                reason = "Failed verification (hallucination or irrelevance detected)."
+        
+        return is_pass, reason
+    except Exception as e:
+        return True, f"Critique script error: {str(e)}"
+
+
+def rewrite_query(original_query: str, model_alias: str = "groq_llama_8b") -> str:
+    """
+    Uses an LLM to expand/rewrite the user's query for better retrieval.
+    """
+    rewriter_prompt_path = os.path.join(os.path.dirname(__file__), "rewriter_system_prompt.txt")
+    try:
+        with open(rewriter_prompt_path, "r", encoding="utf-8") as f:
+            system_msg = f.read()
+    except FileNotFoundError:
+        return original_query
+
+    # Call LLM (Groq preferred for speed)
+    def _get_env_key(keys: list[str]) -> Optional[str]:
+        for k in keys:
+            val = os.getenv(k)
+            if val: return val
+        return None
+
+    api_key_gemini = _get_env_key(["GOOGLE_API_KEY", "GEMINI_API_KEY", "gemini_api_key"])
+    api_key_groq   = _get_env_key(["GROQ_API_KEY", "groq_api_key"])
+
+    env_keys = {
+        "groq":   api_key_groq,
+        "gemini": api_key_gemini,
+    }
+    provider = MODEL_MAP.get(model_alias, {}).get("provider", "groq")
+    api_key = env_keys.get(provider)
+    
+    if not api_key:
+        return original_query
+
+    try:
+        if provider == "groq":
+            rewritten = _call_groq(MODEL_MAP[model_alias]["id"], api_key, system_msg, original_query)
+        else:
+            rewritten = _call_gemini(MODEL_MAP[model_alias]["id"], api_key, system_msg, original_query)
+        
+        return rewritten.strip()
+    except Exception:
+        return original_query

@@ -80,150 +80,69 @@ def _is_heading_line(line: str) -> bool:
 
 # ── Parsers ────────────────────────────────────────────────────────
 
-def load_pdf(file_path: str) -> list[dict]:
+def load_pdf(file_path: str) -> str:
     """
-    Extract text from a text-based PDF, page by page.
-    Tracks the most recent heading seen to attach as section_heading metadata.
+    Extract text from a text-based PDF and format it as Markdown.
+    Uses font/positional heuristics (via pdfplumber) to identify headers.
     """
-    records = []
     filename = pathlib.Path(file_path).name
-    doc_title = _infer_doc_title(filename)
-    doc_type = _infer_doc_type(filename)
-    ingested_at = datetime.now(timezone.utc).isoformat()
-    current_heading = "General"
-
+    md_lines = [f"# {filename}\n"]  # Default doc-level header
+    
     with pdfplumber.open(file_path) as pdf:
-        for page_num, page in enumerate(pdf.pages, start=1):
+        for page in pdf.pages:
             text = page.extract_text()
-            if not text or len(text.strip()) < 40:
-                continue  # skip blank / header-only pages
-
-            # Update current heading from page text
+            if not text:
+                continue
+            
+            # Simple heuristic: find lines that look like headings
+            # and prefix them with ##
             for line in text.split("\n"):
-                if _is_heading_line(line):
-                    current_heading = line.strip().rstrip(":").strip()
-                    break  # use first heading found on the page
-
-            records.append({
-                "page_content": text.strip(),
-                "metadata": {
-                    "doc_title":       doc_title,
-                    "doc_type":        doc_type,
-                    "department":      "All",
-                    "section_heading": current_heading,
-                    "page_number":     page_num,
-                    "source_filename": filename,
-                    "ingested_at":     ingested_at,
-                },
-            })
-
-    return records
+                stripped = line.strip()
+                if _is_heading_line(stripped):
+                    md_lines.append(f"\n## {stripped}\n")
+                else:
+                    md_lines.append(stripped)
+            
+            md_lines.append("\n") # Newline between pages
+            
+    return "\n".join(md_lines)
 
 
-def load_docx(file_path: str) -> list[dict]:
+def load_docx(file_path: str) -> str:
     """
-    Extract text from a DOCX file, grouping paragraphs under their
-    nearest preceding Heading-style paragraph.
+    Extract text from a DOCX file and format as Markdown.
+    Uses Word's native heading styles.
     """
-    records = []
     filename = pathlib.Path(file_path).name
-    doc_title = _infer_doc_title(filename)
-    doc_type = _infer_doc_type(filename)
-    ingested_at = datetime.now(timezone.utc).isoformat()
-
+    md_lines = [f"# {filename}\n"]
+    
     doc = DocxDocument(file_path)
-    current_heading = "General"
-    current_section: list[str] = []
-    section_index = 0
-
-    def _flush():
-        nonlocal section_index
-        if current_section:
-            records.append({
-                "page_content": "\n".join(current_section),
-                "metadata": {
-                    "doc_title":       doc_title,
-                    "doc_type":        doc_type,
-                    "department":      "All",
-                    "section_heading": current_heading,
-                    "page_number":     section_index,
-                    "source_filename": filename,
-                    "ingested_at":     ingested_at,
-                },
-            })
-            section_index += 1
-
     for para in doc.paragraphs:
         text = para.text.strip()
         if not text:
             continue
-
-        if para.style.name.startswith("Heading"):
-            _flush()
-            current_section = []
-            current_heading = text
+            
+        if para.style.name.startswith("Heading 1"):
+            md_lines.append(f"\n## {text}\n")
+        elif para.style.name.startswith("Heading"):
+            md_lines.append(f"\n### {text}\n")
         else:
-            current_section.append(text)
+            md_lines.append(text)
+            
+    return "\n".join(md_lines)
 
-    _flush()  # flush final section
-    return records
 
-
-def load_txt(file_path: str) -> list[dict]:
-    """
-    Load a plain text or markdown file as a single record.
-    Splits on double-newlines to create multiple records if the file is large.
-    """
-    filename = pathlib.Path(file_path).name
-    doc_title = _infer_doc_title(filename)
-    doc_type = _infer_doc_type(filename)
-    ingested_at = datetime.now(timezone.utc).isoformat()
-
+def load_txt(file_path: str) -> str:
+    """Load a plain text or markdown file as raw text."""
     with open(file_path, "r", encoding="utf-8") as f:
-        full_text = f.read()
-
-    # Split on double newlines for loose section grouping
-    sections = [s.strip() for s in re.split(r"\n{2,}", full_text) if s.strip()]
-    if not sections:
-        return []
-
-    records = []
-    for idx, section in enumerate(sections, start=1):
-        # Extract a heading from the first line if it looks like one
-        first_line = section.split("\n")[0].strip()
-        heading = first_line if _is_heading_line(first_line) or first_line.startswith("#") else "General"
-        heading = heading.lstrip("#").strip()
-
-        records.append({
-            "page_content": section,
-            "metadata": {
-                "doc_title":       doc_title,
-                "doc_type":        doc_type,
-                "department":      "All",
-                "section_heading": heading,
-                "page_number":     idx,
-                "source_filename": filename,
-                "ingested_at":     ingested_at,
-            },
-        })
-
-    return records
+        return f.read()
 
 
 # ── Public API ─────────────────────────────────────────────────────
 
-def load_document(file_path: str) -> list[dict]:
+def load_document_to_markdown(file_path: str) -> str:
     """
-    Route a file to the correct parser based on its extension.
-
-    Supported formats:
-      .pdf   — text-based PDF (pdfplumber)
-      .docx  — Word document (python-docx)
-      .txt   — plain text
-      .md    — markdown
-
-    Returns a list of page/section records ready for chunking.
-    Raises ValueError for unsupported file types.
+    Route a file to the correct parser and return its structured Markdown.
     """
     ext = pathlib.Path(file_path).suffix.lower()
     if ext == ".pdf":
@@ -233,7 +152,4 @@ def load_document(file_path: str) -> list[dict]:
     elif ext in (".txt", ".md"):
         return load_txt(file_path)
     else:
-        raise ValueError(
-            f"Unsupported file type: '{ext}'. "
-            "Accepted formats: .pdf, .docx, .txt, .md"
-        )
+        raise ValueError(f"Unsupported file type: '{ext}'")
