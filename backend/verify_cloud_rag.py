@@ -26,11 +26,10 @@ def verify_setup():
         print(f"   ❌ Qdrant Connection Failed: {e}")
         return
 
-    # 2. Test Judge (Gemini)
-    print("\n2️⃣ Testing LLM-as-a-Judge (Gemini)...")
-    gemini_key = os.getenv("GOOGLE_API_KEY") or os.getenv("GEMINI_API_KEY") or os.getenv("gemini_api_key")
-    if not gemini_key:
-        print("   ⚠️  Gemini API key missing in .env")
+    # 2. Test Judge (Groq)
+    print("\n2️⃣ Testing LLM-as-a-Judge (Groq)...")
+    if not os.getenv("GROQ_API_KEY") and not os.getenv("groq_api_key"):
+        print("   ⚠️  GROQ_API_KEY missing in .env")
     else:
         try:
             # Mock a judgment

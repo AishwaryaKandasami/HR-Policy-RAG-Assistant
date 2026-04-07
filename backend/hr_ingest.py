@@ -299,8 +299,6 @@ def ingest_file(file_path: str, api_key: str | None = None, original_filename: s
     display_filename = original_filename if original_filename else pathlib.Path(file_path).name
     
     # Standardise metadata across all chunks before ingestion
-    # Import the title inference logic to keep it consistent
-    from hr_doc_loader import _infer_doc_title
     display_title = _infer_doc_title(display_filename)
 
     for c in chunks:

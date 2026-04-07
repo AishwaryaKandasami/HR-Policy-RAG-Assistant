@@ -166,7 +166,7 @@ def generate_answer(
         }
 # ── Evaluation & Refinement ────────────────────────────────────────
 
-def judge_answer(query: str, answer: str, retrieved_chunks: list[dict], model_alias: str = "gemini_flash") -> tuple[bool, str]:
+def judge_answer(query: str, answer: str, retrieved_chunks: list[dict], model_alias: str = "groq_llama_70b") -> tuple[bool, str]:
     """
     Acts as the "LLM-as-a-Judge". 
     Evaluates faithfulness and relevance before returning to the user.
@@ -219,15 +219,18 @@ def judge_answer(query: str, answer: str, retrieved_chunks: list[dict], model_al
         else:
              raw_eval = _call_openai(MODEL_MAP[model_alias]["id"], api_key, system_msg, user_msg)
 
-        # Parse result
-        is_pass = "[RESULT] PASS" in raw_eval.upper()
+        # Parse result (looking for [RESULT] or just PASS/FAIL in the first few lines)
+        raw_upper = raw_eval.upper()
+        # Find [RESULT] or search for the words PASS/FAIL
+        is_pass = "PASS" in raw_upper and "FAIL" not in raw_upper
+        
         reason = "Passed verification."
         if not is_pass:
             # Extract reason if possible
             if "[REASON]" in raw_eval:
                 reason = raw_eval.split("[REASON]")[1].strip()
             else:
-                reason = "Failed verification (hallucination or irrelevance detected)."
+                reason = "Potential hallucination or out-of-context info detected."
         
         return is_pass, reason
     except Exception as e:
