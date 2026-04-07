@@ -94,25 +94,27 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         print(f"⚠️  Cloud sync failed: {e}. Starting with empty session.")
 
-    # 2. Pre-load demo docs
+    # 2. Pre-load demo docs ONLY if collection is empty
     if DEMO_DOCS_DIR.exists():
-        demo_files = sorted(DEMO_DOCS_DIR.glob("*"))
-        eligible = [f for f in demo_files if f.suffix.lower() in SUPPORTED_EXTENSIONS]
-        if eligible:
-            print(f"\n📂 Pre-loading {len(eligible)} demo HR document(s) (Free Local Embeddings)...")
-            for doc_path in eligible:
-                try:
-                    # Ingest using local embeddings (no OpenAI key needed)
-                    result = ingest_file(str(doc_path), original_filename=doc_path.name)
-                    print(
-                        f"  ✅ {result['doc_title']}"
-                        f" — {result['chunks_added']} chunks"
-                    )
-                except Exception as e:
-                    print(f"  ⚠  Could not pre-load {doc_path.name}: {e}")
-            print()
+        from hr_ingest import check_doc_exists
+        # We check if there's *any* document in the store. 
+        # get_ingested_docs() returns a list of all docs.
+        existing_docs = get_ingested_docs()
+        
+        if not existing_docs:
+            demo_files = sorted(DEMO_DOCS_DIR.glob("*"))
+            eligible = [f for f in demo_files if f.suffix.lower() in SUPPORTED_EXTENSIONS]
+            if eligible:
+                print(f"\n📂 Collection empty. Pre-loading {len(eligible)} demo documents...")
+                for doc_path in eligible:
+                    try:
+                        result = ingest_file(str(doc_path), original_filename=doc_path.name)
+                        print(f"  ✅ {result['doc_title']} — {result['chunks_added']} chunks")
+                    except Exception as e:
+                        print(f"  ⚠  Could not pre-load {doc_path.name}: {e}")
+                print()
         else:
-            print("ℹ  demo_docs/ exists but contains no supported files.")
+            print(f"ℹ  Collection already contains {len(existing_docs)} docs. Skipping demo pre-load.")
     else:
         print(f"ℹ  demo_docs/ directory not found at {DEMO_DOCS_DIR}")
 
