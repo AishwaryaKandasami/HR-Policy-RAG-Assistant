@@ -130,9 +130,10 @@ def sync_bm25_from_cloud() -> int:
         )
         
         for p in points:
+            txt = p.payload.get("chunk_text") or p.payload.get("text", "")
             all_chunks.append({
-                "text": p.payload.get("chunk_text", ""),
-                "metadata": {k: v for k, v in p.payload.items() if k != "chunk_text"}
+                "text": txt,
+                "metadata": {k: v for k, v in p.payload.items() if k not in ["chunk_text", "text"]}
             })
             
         if offset is None:
@@ -314,14 +315,14 @@ def ingest_file(file_path: str, api_key: str | None = None, original_filename: s
                 id=str(uuid.uuid4()),
                 vector=embedding,
                 payload={
-                    "chunk_text":      chunk["text"],
-                    "doc_title":       m["doc_title"],
-                    "doc_type":        m["doc_type"],
-                    "department":      m["department"],
-                    "section_heading": m["section_heading"],
-                    "page_number":     m["page_number"],
+                    "chunk_text":      chunk.get("text", ""),
+                    "doc_title":       m.get("doc_title", "Unknown"),
+                    "doc_type":        m.get("doc_type", "document"),
+                    "department":      m.get("department", "All"),
+                    "section_heading": m.get("section_heading", "General"),
+                    "page_number":     m.get("page_number", 1),
                     "source_filename": display_filename,
-                    "ingested_at":     m["ingested_at"],
+                    "ingested_at":     m.get("ingested_at", ""),
                 },
             )
         )
