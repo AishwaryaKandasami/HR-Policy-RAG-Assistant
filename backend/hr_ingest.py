@@ -270,19 +270,24 @@ def ingest_file(file_path: str, api_key: str | None = None, original_filename: s
             "warning":      "No text could be extracted.",
         }
 
-    # 2. Chunk (Header-Aware)
+    # 2. Resolve metadata early to avoid scope conflicts
+    display_title = _infer_doc_title(display_filename)
+    display_type  = _infer_doc_type(display_filename)
+
     metadata_base = {
-        "doc_title":       _infer_doc_title(display_filename),
-        "doc_type":        _infer_doc_type(display_filename),
+        "doc_title":       display_title,
+        "doc_type":        display_type,
         "department":      "All",
         "ingested_at":     datetime.now(timezone.utc).isoformat(),
         "source_filename": display_filename
     }
+
+    # 3. Chunk (Header-Aware)
     chunks = chunk_markdown(md_text, metadata_base)
     if not chunks:
         return {
             "filename":     display_filename,
-            "doc_title":    metadata_base["doc_title"],
+            "doc_title":    display_title,
             "chunks_added": 0,
             "warning":      "No usable chunks produced.",
         }
@@ -295,12 +300,6 @@ def ingest_file(file_path: str, api_key: str | None = None, original_filename: s
     qdrant = get_qdrant()
     points = []
     
-    # Use original filename if provided, otherwise the basename of the file path
-    display_filename = original_filename if original_filename else pathlib.Path(file_path).name
-    
-    # Standardise metadata across all chunks before ingestion
-    display_title = _infer_doc_title(display_filename)
-
     for c in chunks:
         c["metadata"]["source_filename"] = display_filename
         c["metadata"]["doc_title"]       = display_title
