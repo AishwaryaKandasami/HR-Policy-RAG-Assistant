@@ -67,7 +67,7 @@ def get_qdrant() -> QdrantClient:
             print("💡 QDRANT_URL/API_KEY not found. Falling back to in-memory mode (session-scoped).")
             _qdrant_client = QdrantClient(":memory:")
 
-        # Ensure collection exists
+        # 1. Ensure collection exists
         try:
             _qdrant_client.get_collection(COLLECTION_NAME)
         except Exception:
@@ -76,14 +76,16 @@ def get_qdrant() -> QdrantClient:
                 collection_name=COLLECTION_NAME,
                 vectors_config=VectorParams(size=EMBED_DIMS, distance=Distance.COSINE),
             )
-            # Create a Payload Index (Required by Qdrant Cloud for filters)
+
+        # 2. ALWAYS ensure Payload Index exists (Required by Qdrant Cloud for filters)
+        try:
             _qdrant_client.create_payload_index(
                 collection_name=COLLECTION_NAME,
                 field_name="source_filename",
                 field_schema=PayloadSchemaType.KEYWORD,
             )
         except Exception:
-            # If it already exists or index exists, this might fail, which is fine
+            # If index already exists or creation fails, we proceed
             pass
     return _qdrant_client
 
