@@ -7,6 +7,7 @@
 backend/session_audit.csv
 backend/debug_qdrant.py
 backend/hr_system_prompt.txt.bak
+scratch/
 
 # ── Python ────────────────────────────────────────────
 __pycache__/

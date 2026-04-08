@@ -81,7 +81,7 @@ def _check_personal_situational(query: str) -> bool:
     Logic: Presence of personal intent markers (my, I am, etc.) 
     combined with sensitive topics OR specific advice requests.
     """
-    q = query.lower()
+    q = query.strip().lower()
     
     # Direct advice requests or personal manager references are always situational
     if any(k in q for k in PERSONAL_INTENT_KEYWORDS):
@@ -89,7 +89,14 @@ def _check_personal_situational(query: str) -> bool:
         
     # Sensitive topics are situational ONLY if they don't look like general definitions.
     has_sensitive_topic = any(k in q for k in SENSITIVE_TOPICS)
-    is_general_definition = any(q.startswith(prefix) for prefix in ["what is", "what are", "define", "difference between"])
+    
+    # Broaden general definition prefixes to include common factual question starts
+    general_prefixes = [
+        "what is", "what are", "define", "difference between", 
+        "how does", "how do", "can you explain", "tell me about",
+        "what does", "what are the", "is there a", "when is it"
+    ]
+    is_general_definition = any(q.startswith(prefix) for prefix in general_prefixes)
     
     if has_sensitive_topic and not is_general_definition:
         return True

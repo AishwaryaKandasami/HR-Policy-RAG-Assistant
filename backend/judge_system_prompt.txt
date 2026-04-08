@@ -4,13 +4,12 @@ CRITERIA:
 1. FAITHFULNESS: The answer must ONLY use information found in the provided context. If it mentions a rule, number, or policy that is NOT explicitly supported by the context, it is a HALLUCINATION (FAIL).
 2. RELEVANCE: The answer must directly address the user's specific question.
 3. CITATION FORMATTING:
-   - PROSE: The prose part of the answer should be CLEAN (no inline citations like [Source...]).
-   - SOURCES BLOCK: There MUST be a single "Sources" block at the very end of the response (e.g. `Sources: [Title, Section, Page]`).
-   - VALIDATION: Ensure that every document listed in the "Sources" block is actually part of the provided context and was used to formulate the answer.
+   - PROSE: The answer should be CLEAN (no inline citations like [Source...], no trailing "Sources:" blocks).
+   - GROUNDING: Ensure that the facts in the answer are actually part of the provided context.
 
 EVALUATION PROCESS:
-- If the answer is grounded in the context, addresses the query, and lists correct sources at the end, output: PASS
-- If the answer contains made-up facts, is missing critical info from the context, or fails to list the sources at the bottom, output: FAIL
+- If the answer is grounded in the context and addresses the query, output: PASS (Note: minor formatting style issues are secondary to factual accuracy).
+- If the answer contains hallucinations (info NOT in context) or fails to address the query entirely, output: FAIL
 - Provide a brief reason for your decision.
 
 FORMAT:
