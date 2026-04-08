@@ -387,6 +387,14 @@ async def query_hr_bot(request: QueryRequest):
     else:
         confidence_label = "Low"
 
+    # Action 3: GDPR Confidence Override
+    # Reranker often scores DPA 2018 low for "GDPR" queries.
+    q_lower = request.query.lower()
+    a_lower = final_gen_result["answer"].lower()
+    if "gdpr" in q_lower and "data protection act" in a_lower:
+        print("💡 GDPR Confidence Override: Recalibrating to Medium.")
+        confidence_label = "Medium"
+
     return QueryResponse(
         answer=final_gen_result["answer"],
         sources=[c["metadata"] for c in final_retrieved_chunks],

@@ -36,8 +36,23 @@ PERSONAL_INTENT_KEYWORDS = [
 # Sensitive HR topics that might require human escalation if framed personally.
 SENSITIVE_TOPICS = [
     "harassment", "bullying", "discrimination", "misconduct",
-    "hostile work environment", "sue", "legal action", "tribunal",
+    "hostile work environment", "sue", "legal action",
     "disciplinary", "grievance", "dismissal", "fired", "litigation"
+]
+
+# Tribunal Contexts
+TRIBUNAL_PERSONAL = [
+    "my tribunal", "i am going to tribunal", "taking to tribunal", 
+    "i want to sue", "i am suing", "facing a tribunal", "facing tribunal", 
+    "at tribunal", "tribunal case"
+]
+
+# Factual Openers (Safety Net)
+FACTUAL_OPENERS = [
+    "according to", "based on", "under the", "per the", 
+    "in the context of", "as per", "as stated", "does the",
+    "is there a", "is there any", "can an employer", "can a company",
+    "what happens when", "what happens if an employer"
 ]
 
 # Out-of-Scope Topics
@@ -77,30 +92,32 @@ def _check_injection(query: str) -> bool:
 
 def _check_personal_situational(query: str) -> bool:
     """
-    Returns True if the query appears to be a personal situational request.
-    Logic: Presence of personal intent markers (my, I am, etc.) 
-    combined with sensitive topics OR specific advice requests.
+    Escalate ONLY when there is an explicit personal intent signal.
+    Sensitive topic alone is NOT sufficient — it must be combined
+    with a first-person or advice-seeking marker.
     """
     q = query.strip().lower()
-    
-    # Direct advice requests or personal manager references are always situational
+
+    # 1. Direct personal intent markers — always escalate
     if any(k in q for k in PERSONAL_INTENT_KEYWORDS):
         return True
-        
-    # Sensitive topics are situational ONLY if they don't look like general definitions.
-    has_sensitive_topic = any(k in q for k in SENSITIVE_TOPICS)
-    
-    # Broaden general definition prefixes to include common factual question starts
-    general_prefixes = [
-        "what is", "what are", "define", "difference between", 
-        "how does", "how do", "can you explain", "tell me about",
-        "what does", "what are the", "is there a", "when is it"
-    ]
-    is_general_definition = any(q.startswith(prefix) for prefix in general_prefixes)
-    
-    if has_sensitive_topic and not is_general_definition:
+
+    # 2. Tribunal in personal context — always escalate
+    if any(k in q for k in TRIBUNAL_PERSONAL):
         return True
-        
+
+    # 3. First-person pronouns combined with sensitive topic
+    FIRST_PERSON = ["i am", "i was", "i've", "i have", "i need advice", "i want to"]
+    has_first_person = any(k in q for k in FIRST_PERSON)
+    has_sensitive_topic = any(k in q for k in SENSITIVE_TOPICS)
+
+    if has_first_person and has_sensitive_topic:
+        return True
+
+    # 4. Factual openers safety net — always indicates a policy question
+    if any(q.startswith(opener) or opener in q for opener in FACTUAL_OPENERS):
+        return False
+
     return False
 
 
