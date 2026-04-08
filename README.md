@@ -6,7 +6,7 @@ Built with a **FastAPI** backend (Python) and a **Next.js 14** frontend (TypeScr
 
 ---
 
-*   **Self-Correcting RAG Loop**: Uses an **LLM-as-a-Judge** (Gemini 2.0 Flash) to verify answer faithfulness and relevance, with automated query rewriting on failure.
+*   **Self-Correcting RAG Loop**: Uses an **LLM-as-a-Judge** (Llama 3.1/3.3) to verify answer faithfulness and relevance, with automated query rewriting on failure.
 *   **Persistent Cloud Vector Storage**: Uses **Qdrant Cloud (Free Tier)** to ensure user-uploaded documents persist across server restarts.
 *   **Structured Metadata Parsing**: Converts PDF/DOCX to **Structured Markdown** and uses **Header-Aware Chunking** (via `MarkdownHeaderTextSplitter`) to preserve policy context.
 *   **Hybrid Retrieval Engine**: Combines **Qdrant** (Dense Vector) and **BM25** (Sparse Keyword) search.
