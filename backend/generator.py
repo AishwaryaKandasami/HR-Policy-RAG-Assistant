@@ -165,6 +165,7 @@ def generate_answer(
     except Exception as e:
         return {
             "answer": f"Generation Error ({provider}): {str(e)}",
+            "model_used": "none",
             "success": False
         }
 # ── Evaluation & Refinement ────────────────────────────────────────

@@ -398,7 +398,7 @@ async def query_hr_bot(request: QueryRequest):
     return QueryResponse(
         answer=final_gen_result["answer"],
         sources=[c["metadata"] for c in final_retrieved_chunks],
-        llm_used=final_gen_result["model_used"],
+        llm_used=final_gen_result.get("model_used", "none"),
         success=True,
         status="PASS",
         confidence_score=final_confidence_score,
