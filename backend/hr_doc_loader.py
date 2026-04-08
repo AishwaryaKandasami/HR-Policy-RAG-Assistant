@@ -80,13 +80,13 @@ def _is_heading_line(line: str) -> bool:
 
 # ── Parsers ────────────────────────────────────────────────────────
 
-def load_pdf(file_path: str) -> str:
+def load_pdf(file_path: str, original_filename: str | None = None) -> str:
     """
     Extract text from a text-based PDF and format it as Markdown.
     Uses font/positional heuristics (via pdfplumber) to identify headers.
     """
-    filename = pathlib.Path(file_path).name
-    md_lines = [f"# {filename}\n"]  # Default doc-level header
+    display_name = original_filename if original_filename else pathlib.Path(file_path).name
+    md_lines = [f"# {display_name}\n"]  # Default doc-level header
     
     with pdfplumber.open(file_path) as pdf:
         for page in pdf.pages:
@@ -108,13 +108,13 @@ def load_pdf(file_path: str) -> str:
     return "\n".join(md_lines)
 
 
-def load_docx(file_path: str) -> str:
+def load_docx(file_path: str, original_filename: str | None = None) -> str:
     """
     Extract text from a DOCX file and format as Markdown.
     Uses Word's native heading styles.
     """
-    filename = pathlib.Path(file_path).name
-    md_lines = [f"# {filename}\n"]
+    display_name = original_filename if original_filename else pathlib.Path(file_path).name
+    md_lines = [f"# {display_name}\n"]
     
     doc = DocxDocument(file_path)
     for para in doc.paragraphs:
@@ -140,15 +140,15 @@ def load_txt(file_path: str) -> str:
 
 # ── Public API ─────────────────────────────────────────────────────
 
-def load_document_to_markdown(file_path: str) -> str:
+def load_document_to_markdown(file_path: str, original_filename: str | None = None) -> str:
     """
     Route a file to the correct parser and return its structured Markdown.
     """
     ext = pathlib.Path(file_path).suffix.lower()
     if ext == ".pdf":
-        return load_pdf(file_path)
+        return load_pdf(file_path, original_filename=original_filename)
     elif ext == ".docx":
-        return load_docx(file_path)
+        return load_docx(file_path, original_filename=original_filename)
     elif ext in (".txt", ".md"):
         return load_txt(file_path)
     else:

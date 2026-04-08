@@ -275,7 +275,7 @@ def ingest_file(file_path: str, api_key: str | None = None, original_filename: s
         }
 
     # 1. Parse to Markdown
-    md_text = load_document_to_markdown(file_path)
+    md_text = load_document_to_markdown(file_path, original_filename=display_filename)
     if not md_text or len(md_text.strip()) < 20:
         return {
             "filename":     display_filename,
