@@ -118,8 +118,8 @@ def generate_answer(
             "openai": os.getenv("OPENAI_API_KEY"),
             "gemini": os.getenv("GOOGLE_API_KEY"),
         }
-        # Match alias to provider then find key
-        provider_name = MODEL_MAP.get(model_alias, {}).get("provider")
+    # Match alias to provider then find key
+        provider_name = MODEL_MAP.get(model_alias, MODEL_MAP["groq_llama_70b"]).get("provider")
         api_key = env_keys.get(provider_name)
 
     if not api_key:
@@ -142,9 +142,21 @@ def generate_answer(
     )
 
     # 2. Route to provider
-    config = MODEL_MAP.get(model_alias, MODEL_MAP["groq_llama_8b"])
-    provider = config["provider"]
-    model_id = config["id"]
+    config = MODEL_MAP.get(model_alias)
+    if config:
+        provider = config["provider"]
+        model_id = config["id"]
+    else:
+        # Fallback to dynamic parsing: provider_modelid
+        if "_" in model_alias:
+            parts = model_alias.split("_", 1)
+            provider = parts[0].lower()
+            model_id = parts[1]
+        else:
+            # Absolute default
+            default_config = MODEL_MAP["groq_llama_70b"]
+            provider = default_config["provider"]
+            model_id = default_config["id"]
 
     try:
         if provider == "groq":

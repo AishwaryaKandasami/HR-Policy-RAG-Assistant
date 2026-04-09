@@ -58,10 +58,12 @@ export default function Sidebar({
 
   // Dynamic Nudge Logic
   const getNudge = () => {
-    if (provider.startsWith("groq")) return "Configure GROQ_API_KEY in backend secrets.";
-    if (provider.startsWith("gemini")) return "Configure GOOGLE_API_KEY in backend secrets.";
-    if (provider.startsWith("openai")) return "Configure OPENAI_API_KEY in backend secrets.";
-    return "Check backend secrets for API keys.";
+    if (!provider || provider.startsWith("groq")) return "Active: Groq — ensure GROQ_API_KEY is set in HF Secrets.";
+    if (provider.startsWith("gemini")) return "Active: Gemini — ensure GOOGLE_API_KEY is set in HF Secrets.";
+    if (provider.startsWith("openai")) return "Active: OpenAI — ensure OPENAI_API_KEY is set in HF Secrets.";
+    // Custom provider entered
+    const customProvider = provider.split("_")[0];
+    return `Active: custom provider "${customProvider}" — ensure its API key is set in HF Secrets.`;
   };
 
   return (
@@ -111,21 +113,34 @@ export default function Sidebar({
       {/* 2. LLM SELECTION with Nudges */}
       <div className="pt-6 border-t border-slate-800 space-y-4">
         <div>
-          <label className="text-[10px] uppercase tracking-widest font-bold text-slate-500 mb-2 block">LLM Provider</label>
-          <div className="relative mb-2">
+          <div className="flex items-center justify-between mb-1">
+            <label className="text-[10px] uppercase tracking-widest font-bold text-slate-500">LLM Provider</label>
+            <span className="text-[10px] text-emerald-400 font-semibold">Default: Groq</span>
+          </div>
+          <p className="text-[10px] text-slate-600 mb-2 leading-relaxed">
+            Select from the list or type any model. Leave unchanged to use Groq Llama 70B.
+          </p>
+          <div className="relative mb-1">
             <Cpu className="absolute left-3 top-3 w-4 h-4 text-slate-500" />
-            <select 
-              className="w-full bg-slate-900/50 border border-slate-800 rounded-xl py-2.5 pl-10 pr-4 text-sm focus:ring-2 focus:ring-indigo-500/50 outline-none appearance-none"
+            <input 
+              type="text"
+              list="provider-list"
+              className="w-full bg-slate-900/50 border border-slate-800 rounded-xl py-2.5 pl-10 pr-4 text-sm focus:ring-2 focus:ring-indigo-500/50 outline-none placeholder:text-slate-600"
+              placeholder="groq_llama_70b (default)"
               value={provider}
               onChange={(e) => setProvider(e.target.value)}
-            >
-              <option value="groq_llama_70b">Groq Llama 3.3 70B</option>
+            />
+            <datalist id="provider-list">
+              <option value="groq_llama_70b">Groq Llama 3.3 70B (Default)</option>
               <option value="groq_llama_8b">Groq Llama 3.1 8B</option>
               <option value="gemini_flash">Gemini 2.0 Flash</option>
               <option value="openai_gpt4o">GPT-4o Mini</option>
-            </select>
+            </datalist>
           </div>
-          
+          <p className="text-[10px] text-slate-600 mb-2 italic">
+            Custom format: <span className="text-slate-400 font-mono">provider_modelname</span> (e.g. groq_llama-3.1-8b-instant)
+          </p>
+
           {/* Smart Nudge */}
           <div className="flex items-start gap-2 p-2.5 bg-indigo-500/5 border border-indigo-500/10 rounded-lg">
             <Info className="w-3 h-3 text-indigo-400 mt-0.5 flex-shrink-0" />
