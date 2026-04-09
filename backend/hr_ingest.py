@@ -12,6 +12,7 @@ The BM25 index is rebuilt from scratch whenever a document is added or deleted.
 
 import os
 import pathlib
+import pickle
 import time
 import uuid
 from datetime import datetime, timezone
@@ -42,6 +43,9 @@ EMBED_DIMS      = 384
 CHUNK_SIZE      = 800   # slightly larger for context
 CHUNK_OVERLAP   = 100
 BATCH_SIZE      = 32    # Local batch size
+
+# BM25 cache — stored alongside the app so it survives in-container restarts
+BM25_CACHE_PATH = pathlib.Path(__file__).parent / "bm25_cache.pkl"
 
 # ── Module-level singletons ────────────────────────────────────────
 _qdrant_client: Optional[QdrantClient] = None
@@ -119,19 +123,34 @@ def get_bm25() -> tuple[Optional[BM25Okapi], list[dict]]:
 
 def sync_bm25_from_cloud() -> int:
     """
-    On startup: scroll through all points in Qdrant Cloud to 
-    populate the in-memory BM25 index. This ensures persistence without 
-    storing raw local files.
+    On startup: populate the in-memory BM25 index.
+
+    Fast path  — load from local pickle cache (sub-second).
+    Slow path  — scroll all Qdrant vectors, rebuild, then save pickle.
+    The slow path only runs when no cache exists (first deploy or after
+    a Factory rebuild that wipes the container filesystem).
     """
     global _bm25_corpus
+
+    # ── Fast path: load from pickle ────────────────────────────────
+    if BM25_CACHE_PATH.exists():
+        try:
+            with open(BM25_CACHE_PATH, "rb") as f:
+                cached_corpus = pickle.load(f)
+            if cached_corpus:
+                _rebuild_bm25(cached_corpus)
+                print(f"⚡ BM25 loaded from cache ({len(cached_corpus)} chunks) — skipped Qdrant scroll.")
+                return len(cached_corpus)
+        except Exception as e:
+            print(f"⚠️  BM25 cache load failed ({e}), falling back to Qdrant sync...")
+
+    # ── Slow path: scroll Qdrant and rebuild ───────────────────────
     qdrant = get_qdrant()
-    
-    print("🔄 Syncing BM25 index from Qdrant Cloud...")
-    
-    # Scroll through all points
+    print("🔄 Syncing BM25 index from Qdrant Cloud (first run or cache missing)...")
+
     all_chunks = []
     offset = None
-    
+
     while True:
         points, offset = qdrant.scroll(
             collection_name=COLLECTION_NAME,
@@ -140,23 +159,23 @@ def sync_bm25_from_cloud() -> int:
             with_vectors=False,
             offset=offset
         )
-        
+
         for p in points:
             txt = p.payload.get("chunk_text") or p.payload.get("text", "")
             all_chunks.append({
                 "text": txt,
                 "metadata": {k: v for k, v in p.payload.items() if k not in ["chunk_text", "text"]}
             })
-            
+
         if offset is None:
             break
-            
+
     if all_chunks:
-        _rebuild_bm25(all_chunks)
+        _rebuild_bm25(all_chunks)  # also saves pickle
         print(f"  ✅ Synced {len(all_chunks)} chunks into BM25 index.")
     else:
         print("  ℹ️ No documents found in cloud storage.")
-        
+
     return len(all_chunks)
 
 
@@ -235,6 +254,7 @@ def _rebuild_bm25(corpus: list[dict]) -> None:
     """
     (Re)build the BM25 index from a full corpus list.
     Called after every ingest or delete operation.
+    Also saves the corpus to a pickle cache for fast restart.
     """
     global _bm25_index, _bm25_corpus
     _bm25_corpus = corpus
@@ -243,6 +263,13 @@ def _rebuild_bm25(corpus: list[dict]) -> None:
         _bm25_index = BM25Okapi(tokenised)
     else:
         _bm25_index = None
+
+    # Persist corpus to disk so next restart can skip Qdrant scroll
+    try:
+        with open(BM25_CACHE_PATH, "wb") as f:
+            pickle.dump(corpus, f)
+    except Exception as e:
+        print(f"⚠️  Could not save BM25 cache: {e}")
 
 
 # ── Public ingestion API ───────────────────────────────────────────
