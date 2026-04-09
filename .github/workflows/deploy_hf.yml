@@ -1,0 +1,44 @@
+name: Deploy Backend to Hugging Face Spaces
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - 'backend/**'   # only triggers when backend files change
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout GitHub repo
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          lfs: true
+
+      - name: Push backend to Hugging Face Space
+        env:
+          HF_TOKEN: ${{ secrets.HF_TOKEN }}
+        run: |
+          git config --global user.email "action@github.com"
+          git config --global user.name "GitHub Actions"
+
+          # Clone the HF Space git repo
+          git clone https://AishwaryaKa:${HF_TOKEN}@huggingface.co/spaces/AishwaryaKa/hr-policy-bot hf_space
+
+          # Copy backend contents into the Space root (excluding venv / __pycache__ / .env)
+          rsync -av --exclude='venv/' \
+                    --exclude='__pycache__/' \
+                    --exclude='*.pyc' \
+                    --exclude='.env' \
+                    --exclude='*.csv' \
+                    backend/ hf_space/
+
+          # Commit and push only if there are changes
+          cd hf_space
+          git add .
+          git diff --cached --quiet \
+            && echo "No changes to deploy." \
+            || (git commit -m "deploy: sync from GitHub ${{ github.sha }}" && git push)
