@@ -31,14 +31,7 @@ RUN pip install --no-cache-dir --user -r requirements.txt
 
 # Step 7: Pre-download ML models into the image (avoids runtime download on every restart)
 # This adds ~300 MB to the image but saves ~20-30s cold-start time
-RUN python -c "
-from sentence_transformers import SentenceTransformer, CrossEncoder
-print('Downloading embedding model...')
-SentenceTransformer('all-MiniLM-L6-v2')
-print('Downloading cross-encoder reranker...')
-CrossEncoder('cross-encoder/ms-marco-MiniLM-L-6-v2')
-print('Models cached.')
-"
+RUN python -c "from sentence_transformers import SentenceTransformer, CrossEncoder; print('Downloading embedding model...'); SentenceTransformer('all-MiniLM-L6-v2'); print('Downloading cross-encoder reranker...'); CrossEncoder('cross-encoder/ms-marco-MiniLM-L-6-v2'); print('Models cached.')"
 
 # Step 7: Copy the backend source code and demo docs
 COPY --chown=user . .
