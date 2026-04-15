@@ -145,9 +145,15 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
+# ALLOWED_ORIGINS: comma-separated list set in HF Spaces → Variables & Secrets.
+# e.g. "https://your-app.vercel.app,https://your-app-git-main.vercel.app"
+# Falls back to "*" when unset (local dev only).
+_raw_origins = os.getenv("ALLOWED_ORIGINS", "")
+ALLOWED_ORIGINS = [o.strip() for o in _raw_origins.split(",") if o.strip()] or ["*"]
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],       # Restrict to Vercel domain in v2.0
+    allow_origins=ALLOWED_ORIGINS,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -380,8 +386,14 @@ async def query_hr_bot(request: QueryRequest):
             conversation_history=history,
         )
         
-        # 5. Judge Answer
-        is_pass, judge_reason = judge_answer(current_human_query, gen_result["answer"], retrieved_chunks)
+        # 5. Judge Answer — skip when retrieval confidence is already high
+        # (reranker score > 0.75 means the top chunk is a strong match;
+        # running a second LLM call adds latency with negligible safety gain)
+        if confidence_score > 0.75:
+            print(f"  ⚡ High confidence ({confidence_score:.2f}) — skipping judge.")
+            is_pass, judge_reason = True, "Skipped: high retrieval confidence"
+        else:
+            is_pass, judge_reason = judge_answer(current_human_query, gen_result["answer"], retrieved_chunks)
         
         # Update trackers for possible final output
         final_gen_result = gen_result
@@ -437,9 +449,24 @@ async def query_hr_bot(request: QueryRequest):
         print("💡 GDPR Confidence Override: Recalibrating to Medium.")
         confidence_label = "Medium"
 
+    # Deduplicate sources: same filename + page + section can appear multiple
+    # times because overlapping chunks from the same page all score highly.
+    seen_sources: set[tuple] = set()
+    unique_sources: list[dict] = []
+    for chunk in final_retrieved_chunks:
+        md = chunk["metadata"]
+        key = (
+            md.get("source_filename", ""),
+            md.get("page_number", ""),
+            md.get("section_heading", ""),
+        )
+        if key not in seen_sources:
+            seen_sources.add(key)
+            unique_sources.append(md)
+
     return QueryResponse(
         answer=final_gen_result["answer"],
-        sources=[c["metadata"] for c in final_retrieved_chunks],
+        sources=unique_sources,
         llm_used=final_gen_result.get("model_used", "none"),
         success=True,
         status="PASS",
