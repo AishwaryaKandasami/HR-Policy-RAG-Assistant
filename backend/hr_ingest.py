@@ -290,16 +290,20 @@ def ingest_file(file_path: str, api_key: str | None = None, original_filename: s
         "chunks_added": int,
       }
     """
-    # 0. Check for duplicates
+    # 0. Version check: if this filename already exists, delete the old chunks
+    #    first so re-uploads replace rather than duplicate.  The caller (startup
+    #    demo-doc pre-loader) uses check_doc_exists() separately and never calls
+    #    ingest_file() for already-loaded docs, so this branch only fires when a
+    #    user explicitly re-uploads an updated policy file via /ingest.
     display_filename = original_filename if original_filename else pathlib.Path(file_path).name
+    replaced = False
+    chunks_replaced = 0
     if check_doc_exists(display_filename):
-        print(f"  ⏭️  Skipping {display_filename} (already in cloud store).")
-        return {
-            "filename":     display_filename,
-            "doc_title":    "Already Ingested",
-            "chunks_added": 0,
-            "skipped":      True
-        }
+        print(f"  🔄  '{display_filename}' already exists — removing old version before re-ingesting...")
+        deletion = delete_doc(display_filename)
+        chunks_replaced = deletion["chunks_removed"]
+        replaced = True
+        print(f"      Removed {chunks_replaced} old chunks. Ingesting updated version...")
 
     # 1. Parse to Markdown
     md_text = load_document_to_markdown(file_path, original_filename=display_filename)
@@ -374,9 +378,11 @@ def ingest_file(file_path: str, api_key: str | None = None, original_filename: s
     _rebuild_bm25(updated_corpus)
 
     return {
-        "filename":     display_filename,
-        "doc_title":    display_title,
-        "chunks_added": len(points),
+        "filename":        display_filename,
+        "doc_title":       display_title,
+        "chunks_added":    len(points),
+        "replaced":        replaced,
+        "chunks_replaced": chunks_replaced,
     }
 
 

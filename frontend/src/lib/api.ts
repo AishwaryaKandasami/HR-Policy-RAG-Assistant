@@ -18,6 +18,21 @@ export interface ConversationTurn {
   content: string;
 }
 
+/** Discriminated union for SSE events from /query/stream */
+export type StreamEvent =
+  | { type: "token"; content: string }
+  | {
+      type: "meta";
+      query_id: string;
+      sources: QueryResponse["sources"];
+      confidence_label: string;
+      confidence_score: number;
+      llm_used: string;
+      status?: string;
+      latency_ms?: number;
+    }
+  | { type: "error"; content: string };
+
 export interface QueryResponse {
   answer: string;
   sources: Array<{
@@ -73,6 +88,54 @@ export const api = {
       }),
     });
     return res.json();
+  },
+
+  /** Stream an HR query via SSE — yields StreamEvents until [DONE] */
+  queryStream: async function* (
+    text: string,
+    provider: string,
+    sessionId?: string,
+    conversationHistory?: ConversationTurn[],
+  ): AsyncGenerator<StreamEvent> {
+    const res = await fetch(`${BACKEND_URL}/query/stream`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        query: text,
+        llm_provider: provider,
+        session_id: sessionId,
+        conversation_history: conversationHistory?.slice(-6) ?? [],
+      }),
+    });
+
+    if (!res.ok) throw new Error(`Stream request failed: ${res.status}`);
+    if (!res.body) throw new Error("No response body for stream");
+
+    const reader = res.body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = "";
+
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+
+      buffer += decoder.decode(value, { stream: true });
+      // SSE events are separated by double newline
+      const parts = buffer.split("\n\n");
+      buffer = parts.pop() ?? "";   // keep any incomplete trailing chunk
+
+      for (const part of parts) {
+        const line = part.trim();
+        if (!line.startsWith("data: ")) continue;
+        const raw = line.slice(6).trim();
+        if (raw === "[DONE]") return;
+        try {
+          yield JSON.parse(raw) as StreamEvent;
+        } catch {
+          // malformed event — skip silently
+        }
+      }
+    }
   },
 
   /** List ingested docs */

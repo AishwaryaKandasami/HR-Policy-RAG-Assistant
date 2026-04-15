@@ -13,7 +13,7 @@ Includes:
 """
 
 import os
-from typing import Optional
+from typing import Iterator, Optional
 
 import google.generativeai as genai
 from groq import Groq
@@ -126,6 +126,66 @@ def _call_gemini(model_id: str, api_key: str, system_msg: str, user_msg: str,
     return response.text
 
 
+# ── Streaming Provider Helpers ─────────────────────────────────────
+
+def _stream_groq(model_id: str, api_key: str, system_msg: str, user_msg: str,
+                 history: list[dict] | None = None) -> Iterator[str]:
+    """Yield text tokens from Groq streaming API."""
+    client = Groq(api_key=api_key)
+    messages = _build_messages(system_msg, history or [], user_msg)
+    stream = client.chat.completions.create(
+        messages=messages,
+        model=model_id,
+        temperature=0.1,
+        max_tokens=1024,
+        stream=True,
+    )
+    for chunk in stream:
+        delta = chunk.choices[0].delta.content
+        if delta:
+            yield delta
+
+
+def _stream_openai(model_id: str, api_key: str, system_msg: str, user_msg: str,
+                   history: list[dict] | None = None) -> Iterator[str]:
+    """Yield text tokens from OpenAI streaming API."""
+    client = OpenAI(api_key=api_key)
+    messages = _build_messages(system_msg, history or [], user_msg)
+    stream = client.chat.completions.create(
+        model=model_id,
+        messages=messages,
+        temperature=0.1,
+        stream=True,
+    )
+    for chunk in stream:
+        delta = chunk.choices[0].delta.content
+        if delta:
+            yield delta
+
+
+def _stream_gemini(model_id: str, api_key: str, system_msg: str, user_msg: str,
+                   history: list[dict] | None = None) -> Iterator[str]:
+    """Yield text tokens from Gemini streaming API."""
+    genai.configure(api_key=api_key)
+    model = genai.GenerativeModel(model_name=model_id, system_instruction=system_msg)
+    gemini_history = []
+    for turn in (history or []):
+        role = turn.get("role", "user")
+        if role in ("bot", "assistant"):
+            role = "model"
+        gemini_history.append({"role": role, "parts": [turn.get("content", "")]})
+
+    if gemini_history:
+        chat = model.start_chat(history=gemini_history)
+        response = chat.send_message(user_msg, stream=True)
+    else:
+        response = model.generate_content(user_msg, stream=True)
+
+    for chunk in response:
+        if chunk.text:
+            yield chunk.text
+
+
 # ── Public API ─────────────────────────────────────────────────────
 
 def generate_answer(
@@ -209,6 +269,63 @@ def generate_answer(
             "model_used": "none",
             "success": False
         }
+def generate_answer_stream(
+    query: str,
+    retrieved_chunks: list[dict],
+    model_alias: str = "groq_llama_70b",
+    api_key: Optional[str] = None,
+    conversation_history: Optional[list[dict]] = None,
+) -> Iterator[str]:
+    """
+    Streaming variant of generate_answer.
+    Yields raw text tokens as they arrive from the LLM provider.
+    No judge / rewrite loop — caller is responsible for guardrails upstream.
+    """
+    # Resolve API key (same logic as generate_answer)
+    if not api_key:
+        env_keys = {
+            "groq":   os.getenv("GROQ_API_KEY"),
+            "openai": os.getenv("OPENAI_API_KEY"),
+            "gemini": os.getenv("GOOGLE_API_KEY"),
+        }
+        provider_name = MODEL_MAP.get(model_alias, MODEL_MAP["groq_llama_70b"]).get("provider")
+        api_key = env_keys.get(provider_name)
+
+    if not api_key:
+        yield "Error: Missing API key for the selected provider."
+        return
+
+    system_msg = _load_system_prompt()
+    context_block = _format_context(retrieved_chunks)
+    user_msg = (
+        f"CONTEXT FROM HR DOCUMENTS:\n{context_block}\n\n"
+        f"USER QUESTION: {query}\n\n"
+        f"INSTRUCTIONS:\n"
+        f"1. Answer the user's question using the provided context only.\n"
+        f"2. Use clean, objective prose. NO personal framing ('you should', 'if you are').\n"
+        f"3. NO citations or metadata. Do not include 'Sources:' or [Source...] tags.\n"
+        f"4. If the question involves personal advice or active disputes, provide only the "
+        f"policy facts and refer them to their HRBP."
+    )
+
+    history = conversation_history or []
+    config = MODEL_MAP.get(model_alias, MODEL_MAP["groq_llama_70b"])
+    provider = config["provider"]
+    model_id = config["id"]
+
+    try:
+        if provider == "groq":
+            yield from _stream_groq(model_id, api_key, system_msg, user_msg, history)
+        elif provider == "openai":
+            yield from _stream_openai(model_id, api_key, system_msg, user_msg, history)
+        elif provider == "gemini":
+            yield from _stream_gemini(model_id, api_key, system_msg, user_msg, history)
+        else:
+            yield f"Unknown provider: {provider}"
+    except Exception as e:
+        yield f"Generation Error ({provider}): {str(e)}"
+
+
 # ── Evaluation & Refinement ────────────────────────────────────────
 
 def judge_answer(query: str, answer: str, retrieved_chunks: list[dict], model_alias: str = "groq_llama_70b") -> tuple[bool, str]:
