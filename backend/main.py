@@ -212,13 +212,18 @@ async def ingest_documents(
             pathlib.Path(tmp_path).unlink(missing_ok=True)
 
     total_chunks = sum(r.get("chunks_added", 0) for r in results)
+    total_replaced = sum(r.get("chunks_replaced", 0) for r in results)
+    docs_replaced = sum(1 for r in results if r.get("replaced"))
     return JSONResponse(
         status_code=200,
         content={
-            "status":             "ok" if not errors else "partial",
-            "ingested":           results,
-            "errors":             errors,
-            "total_chunks_added": total_chunks,
+            "status":              "ok" if not errors else "partial",
+            "ingested":            results,
+            "errors":              errors,
+            "total_chunks_added":  total_chunks,
+            # Versioning info — non-zero when an existing doc was updated
+            "docs_replaced":       docs_replaced,
+            "total_chunks_replaced": total_replaced,
         },
     )
 
