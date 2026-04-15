@@ -35,10 +35,16 @@ from audit_log import get_log_file_path, log_interaction, log_feedback
 from generator import generate_answer
 from hr_guardrails import classify_query
 from hr_ingest import delete_doc, get_embed_model, get_ingested_docs, get_openai, get_qdrant, ingest_file
+from intent_router import classify_intent
 from retriever import retrieve
 
 
 # ── Data Models ───────────────────────────────────────────────────
+
+class ConversationTurn(BaseModel):
+    role: str = Field(..., description="'user' or 'assistant'")
+    content: str = Field(..., description="The message text")
+
 
 class QueryRequest(BaseModel):
     query: str = Field(..., example="What is the maternity leave entitlement?")
@@ -46,6 +52,11 @@ class QueryRequest(BaseModel):
     # Keys are now optional; server will use its own secrets if these are None
     openai_api_key: Optional[str] = Field(None, description="Optional override for embedding")
     provider_api_key: Optional[str] = Field(None, description="Optional override for LLM provider")
+    # Session memory (client-driven — frontend sends last N turns per request)
+    session_id: Optional[str] = Field(None, description="Client-generated UUID for audit correlation")
+    conversation_history: Optional[list[ConversationTurn]] = Field(
+        None, description="Prior turns in this conversation (last ~6), for multi-turn coherence"
+    )
 
 
 class QueryResponse(BaseModel):
@@ -264,9 +275,34 @@ async def query_hr_bot(request: QueryRequest):
     start_time = time.perf_counter()
     query_id = str(uuid.uuid4())
 
-    # 1. Guardrails (Safety Check)
+    # 1a. Intent router — short-circuit small-talk before any RAG work
+    intent = classify_intent(request.query)
+    if intent["short_circuit"]:
+        latency = (time.perf_counter() - start_time) * 1000
+        log_interaction(
+            query_id=query_id,
+            query=request.query,
+            answer=intent["response"],
+            blocked=False,
+            escalated=False,
+            latency_ms=latency,
+            session_id=request.session_id,
+        )
+        return QueryResponse(
+            answer=intent["response"],
+            sources=[],
+            llm_used="none",
+            success=True,
+            status="PASS",
+            confidence_score=1.0,
+            confidence_label="N/A",
+            latency_ms=latency,
+            query_id=query_id,
+        )
+
+    # 1b. Guardrails (Safety Check)
     guard = classify_query(request.query)
-    
+
     if guard["status"] != "PASS":
         latency = (time.perf_counter() - start_time) * 1000
         log_interaction(
@@ -276,7 +312,8 @@ async def query_hr_bot(request: QueryRequest):
             blocked=(guard["status"] == "BLOCK"),
             block_reason=guard["reason"],
             escalated=(guard["status"] == "ESCALATE"),
-            latency_ms=latency
+            latency_ms=latency,
+            session_id=request.session_id,
         )
         return QueryResponse(
             answer=guard["message"],
@@ -325,19 +362,22 @@ async def query_hr_bot(request: QueryRequest):
         if not retrieved_chunks:
             print(f"  ⚠️ No chunks found for '{current_search_query}'")
             if i == 1:
-                current_search_query = rewrite_query(current_human_query)
+                history = [t.model_dump() for t in request.conversation_history] if request.conversation_history else []
+                current_search_query = rewrite_query(current_human_query, conversation_history=history)
                 continue
             else:
                 final_gen_result = {"answer": "I'm sorry, I couldn't find any documents related to your question.", "model_used": "none"}
                 break
 
         # 4. Generate Answer
+        history = [t.model_dump() for t in request.conversation_history] if request.conversation_history else []
         gen_result = generate_answer(
             query=current_human_query,
             retrieved_chunks=retrieved_chunks,
             model_alias=request.llm_provider,
             api_key=request.provider_api_key or request.openai_api_key,
-            confidence_score=confidence_score
+            confidence_score=confidence_score,
+            conversation_history=history,
         )
         
         # 5. Judge Answer
@@ -355,7 +395,8 @@ async def query_hr_bot(request: QueryRequest):
             print(f"  ❌ Attempt {i} FAILED judgment: {judge_reason}")
             if i == 1:
                 # Expand query for more context
-                current_search_query = rewrite_query(current_human_query)
+                history = [t.model_dump() for t in request.conversation_history] if request.conversation_history else []
+                current_search_query = rewrite_query(current_human_query, conversation_history=history)
             else:
                 # Final refusal logic
                 final_gen_result["answer"] = (
@@ -376,7 +417,8 @@ async def query_hr_bot(request: QueryRequest):
         llm_used=final_gen_result.get("model_used", "none"),
         blocked=False,
         escalated=False,
-        latency_ms=latency
+        latency_ms=latency,
+        session_id=request.session_id,
     )
 
     # 7. Determine Confidence Label

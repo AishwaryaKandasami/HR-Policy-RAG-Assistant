@@ -15,8 +15,8 @@ LOG_FILE = "session_audit.csv"
 
 # Columns to log
 HEADERS = [
-    "query_id", "timestamp", "query", "answer_preview", "doc_title", "section", 
-    "page", "llm_used", "blocked", "block_reason", "escalated", 
+    "session_id", "query_id", "timestamp", "query", "answer_preview", "doc_title", "section",
+    "page", "llm_used", "blocked", "block_reason", "escalated",
     "latency_ms", "rating", "feedback_reason"
 ]
 
@@ -36,7 +36,8 @@ def log_interaction(
     blocked: bool = False,
     block_reason: Optional[str] = None,
     escalated: bool = False,
-    latency_ms: float = 0.0
+    latency_ms: float = 0.0,
+    session_id: Optional[str] = None,
 ):
     """
     Records a single query-answer interaction into the session store.
@@ -50,6 +51,7 @@ def log_interaction(
     answer_preview = (answer[:100] + "...") if len(answer) > 100 else answer
 
     row = {
+        "session_id":     session_id or "",
         "query_id":       query_id,
         "timestamp":      datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
         "query":          query,

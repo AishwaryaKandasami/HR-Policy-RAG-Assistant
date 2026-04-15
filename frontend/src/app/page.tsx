@@ -6,7 +6,7 @@ import Sidebar from './components/Sidebar';
 import ChatThread from './components/ChatThread';
 import DisclaimerBanner from './components/DisclaimerBanner';
 import OnboardingChecklist from './components/OnboardingChecklist';
-import { api, Doc } from '@/lib/api';
+import { api, Doc, ConversationTurn } from '@/lib/api';
 
 export default function Home() {
   const [docs, setDocs] = useState<Doc[]>([]);
@@ -21,6 +21,9 @@ export default function Home() {
   // Persistence Settings
   const [provider, setProvider] = useState("groq_llama_70b");
 
+  // Session ID: one UUID per browser tab, persisted in sessionStorage
+  const [sessionId, setSessionId] = useState<string>("");
+
   const scrollRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -30,6 +33,16 @@ export default function Home() {
     // Load provider from localStorage if available
     const savedProvider = localStorage.getItem("hr_provider_choice");
     if (savedProvider) setProvider(savedProvider);
+
+    // Generate or rehydrate session ID for this tab
+    const existing = sessionStorage.getItem("hr_session_id");
+    if (existing) {
+      setSessionId(existing);
+    } else {
+      const newId = crypto.randomUUID();
+      sessionStorage.setItem("hr_session_id", newId);
+      setSessionId(newId);
+    }
   }, []);
 
   useEffect(() => {
@@ -53,7 +66,14 @@ export default function Home() {
     setIsLoading(true);
 
     try {
-      const res = await api.query(userMessage, provider);
+      // Build conversation history from current messages for multi-turn context.
+      // Map 'bot' role → 'assistant' to match the LLM messages format.
+      const history: ConversationTurn[] = messages.map((m) => ({
+        role: m.role === "bot" ? "assistant" : "user",
+        content: m.content,
+      }));
+
+      const res = await api.query(userMessage, provider, sessionId, history);
 
       if (res.status === "BLOCK" || res.status === "ESCALATE") {
         setMessages(prev => [...prev, {

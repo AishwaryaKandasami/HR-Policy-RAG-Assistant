@@ -13,6 +13,11 @@ export interface Doc {
   chunks_added: number;
 }
 
+export interface ConversationTurn {
+  role: "user" | "assistant";
+  content: string;
+}
+
 export interface QueryResponse {
   answer: string;
   sources: Array<{
@@ -51,15 +56,20 @@ export const api = {
 
   /** Query the RAG pipeline */
   query: async (
-    text: string, 
-    provider: string
+    text: string,
+    provider: string,
+    sessionId?: string,
+    conversationHistory?: ConversationTurn[],
   ): Promise<QueryResponse> => {
     const res = await fetch(`${BACKEND_URL}/query`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         query: text,
-        llm_provider: provider
+        llm_provider: provider,
+        session_id: sessionId,
+        // Send the last 6 turns maximum to keep the context window bounded
+        conversation_history: conversationHistory?.slice(-6) ?? [],
       }),
     });
     return res.json();
