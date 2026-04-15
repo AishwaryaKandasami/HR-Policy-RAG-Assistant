@@ -62,40 +62,67 @@ def _format_context(retrieved_chunks: list[dict]) -> str:
 
 # ── Provider Clients ───────────────────────────────────────────────
 
-def _call_groq(model_id: str, api_key: str, system_msg: str, user_msg: str) -> str:
+def _build_messages(system_msg: str, history: list[dict], user_msg: str) -> list[dict]:
+    """
+    Build the full messages array: system + prior turns + current user turn.
+    history entries must have {"role": "user"|"assistant", "content": str}.
+    """
+    messages = [{"role": "system", "content": system_msg}]
+    for turn in history:
+        role = turn.get("role", "user")
+        # Normalise any frontend 'bot' role to 'assistant'
+        if role == "bot":
+            role = "assistant"
+        messages.append({"role": role, "content": turn.get("content", "")})
+    messages.append({"role": "user", "content": user_msg})
+    return messages
+
+
+def _call_groq(model_id: str, api_key: str, system_msg: str, user_msg: str,
+               history: list[dict] | None = None) -> str:
     client = Groq(api_key=api_key)
+    messages = _build_messages(system_msg, history or [], user_msg)
     chat_completion = client.chat.completions.create(
-        messages=[
-            {"role": "system", "content": system_msg},
-            {"role": "user", "content": user_msg},
-        ],
+        messages=messages,
         model=model_id,
-        temperature=0.1,  # Keep it grounded
+        temperature=0.1,
         max_tokens=1024,
     )
     return chat_completion.choices[0].message.content
 
 
-def _call_openai(model_id: str, api_key: str, system_msg: str, user_msg: str) -> str:
+def _call_openai(model_id: str, api_key: str, system_msg: str, user_msg: str,
+                 history: list[dict] | None = None) -> str:
     client = OpenAI(api_key=api_key)
+    messages = _build_messages(system_msg, history or [], user_msg)
     response = client.chat.completions.create(
         model=model_id,
-        messages=[
-            {"role": "system", "content": system_msg},
-            {"role": "user", "content": user_msg},
-        ],
+        messages=messages,
         temperature=0.1,
     )
     return response.choices[0].message.content
 
 
-def _call_gemini(model_id: str, api_key: str, system_msg: str, user_msg: str) -> str:
+def _call_gemini(model_id: str, api_key: str, system_msg: str, user_msg: str,
+                 history: list[dict] | None = None) -> str:
     genai.configure(api_key=api_key)
     model = genai.GenerativeModel(
         model_name=model_id,
         system_instruction=system_msg
     )
-    response = model.generate_content(user_msg)
+    # Gemini uses its own history format
+    gemini_history = []
+    for turn in (history or []):
+        role = turn.get("role", "user")
+        if role in ("bot", "assistant"):
+            role = "model"
+        gemini_history.append({"role": role, "parts": [turn.get("content", "")]})
+
+    if gemini_history:
+        chat = model.start_chat(history=gemini_history)
+        response = chat.send_message(user_msg)
+    else:
+        response = model.generate_content(user_msg)
     return response.text
 
 
@@ -106,7 +133,8 @@ def generate_answer(
     retrieved_chunks: list[dict],
     model_alias: str = "groq_llama_8b",
     api_key: Optional[str] = None,
-    confidence_score: float = 0.0
+    confidence_score: float = 0.0,
+    conversation_history: Optional[list[dict]] = None,
 ) -> dict:
     """
     Main entry point for generating an HR policy answer.
@@ -142,6 +170,7 @@ def generate_answer(
     )
 
     # 2. Route to provider
+    history = conversation_history or []
     config = MODEL_MAP.get(model_alias)
     if config:
         provider = config["provider"]
@@ -160,11 +189,11 @@ def generate_answer(
 
     try:
         if provider == "groq":
-            answer = _call_groq(model_id, api_key, system_msg, user_msg)
+            answer = _call_groq(model_id, api_key, system_msg, user_msg, history)
         elif provider == "openai":
-            answer = _call_openai(model_id, api_key, system_msg, user_msg)
+            answer = _call_openai(model_id, api_key, system_msg, user_msg, history)
         elif provider == "gemini":
-            answer = _call_gemini(model_id, api_key, system_msg, user_msg)
+            answer = _call_gemini(model_id, api_key, system_msg, user_msg, history)
         else:
             return {"answer": f"Unknown provider: {provider}", "success": False}
 
@@ -253,9 +282,15 @@ def judge_answer(query: str, answer: str, retrieved_chunks: list[dict], model_al
         return True, f"Critique script error: {str(e)}"
 
 
-def rewrite_query(original_query: str, model_alias: str = "groq_llama_8b") -> str:
+def rewrite_query(
+    original_query: str,
+    model_alias: str = "groq_llama_8b",
+    conversation_history: Optional[list[dict]] = None,
+) -> str:
     """
     Uses an LLM to expand/rewrite the user's query for better retrieval.
+    When conversation_history is provided, the previous user turn is included
+    so ambiguous follow-ups ("and for part-timers?") resolve correctly.
     """
     rewriter_prompt_path = os.path.join(os.path.dirname(__file__), "rewriter_system_prompt.txt")
     try:
@@ -264,32 +299,37 @@ def rewrite_query(original_query: str, model_alias: str = "groq_llama_8b") -> st
     except FileNotFoundError:
         return original_query
 
-    # Call LLM (Groq preferred for speed)
+    # Build the input: optionally prepend the previous user turn for context
+    history = conversation_history or []
+    prev_user_turns = [t for t in history if t.get("role") == "user"]
+    if prev_user_turns:
+        prev_turn = prev_user_turns[-1].get("content", "")
+        rewrite_input = f"Previous question: {prev_turn}\nFollow-up: {original_query}"
+    else:
+        rewrite_input = original_query
+
     def _get_env_key(keys: list[str]) -> Optional[str]:
         for k in keys:
             val = os.getenv(k)
-            if val: return val.strip()
+            if val:
+                return val.strip()
         return None
 
     api_key_gemini = _get_env_key(["GOOGLE_API_KEY", "GEMINI_API_KEY", "gemini_api_key"])
     api_key_groq   = _get_env_key(["GROQ_API_KEY", "groq_api_key"])
 
-    env_keys = {
-        "groq":   api_key_groq,
-        "gemini": api_key_gemini,
-    }
+    env_keys = {"groq": api_key_groq, "gemini": api_key_gemini}
     provider = MODEL_MAP.get(model_alias, {}).get("provider", "groq")
     api_key = env_keys.get(provider)
-    
+
     if not api_key:
         return original_query
 
     try:
         if provider == "groq":
-            rewritten = _call_groq(MODEL_MAP[model_alias]["id"], api_key, system_msg, original_query)
+            rewritten = _call_groq(MODEL_MAP[model_alias]["id"], api_key, system_msg, rewrite_input)
         else:
-            rewritten = _call_gemini(MODEL_MAP[model_alias]["id"], api_key, system_msg, original_query)
-        
+            rewritten = _call_gemini(MODEL_MAP[model_alias]["id"], api_key, system_msg, rewrite_input)
         return rewritten.strip()
     except Exception:
         return original_query

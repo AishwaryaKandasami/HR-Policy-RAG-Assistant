@@ -95,20 +95,27 @@ class TestHRBot(unittest.TestCase):
 
     def test_05_audit_log(self):
         """Verify that interactions are logged to CSV."""
+        import uuid
         if os.path.exists("session_audit.csv"):
             os.remove("session_audit.csv")
-        
+
+        test_query_id = str(uuid.uuid4())
         audit_log.log_interaction(
+            query_id=test_query_id,
             query="Test query",
             answer="Test answer",
             blocked=False,
-            latency_ms=100.5
+            latency_ms=100.5,
+            session_id="test-session-123",
         )
-        self.assertTrue(os.path.exists("session_audit.csv"))
-        with open("session_audit.csv", "r") as f:
+        # get_log_file_path() writes the in-memory log to disk and returns the path
+        log_path = audit_log.get_log_file_path()
+        self.assertTrue(os.path.exists(log_path))
+        with open(log_path, "r") as f:
             content = f.read()
             self.assertIn("Test query", content)
             self.assertIn("100.5", content)
+            self.assertIn("test-session-123", content)
 
     def test_06_hybrid_retrieval(self):
         """Verify that retrieval finds real relevant documents."""
@@ -116,14 +123,13 @@ class TestHRBot(unittest.TestCase):
         try:
             # We search for "maternity" which is in our demo docs
             # Using a zero vector (dense search will be empty, but BM25 should find it)
-            results = retrieve("maternity", [0.0] * 768, top_k=1)
-            self.assertIsInstance(results, list)
-            if results:
-                title = results[0]["metadata"]["doc_title"]
-                self.assertIn("Maternity", title)
-                print(f"  ✅ Retrieval verified: Found '{title}' policy!")
-            else:
-                self.fail("Retrieval returned no results from loaded demo docs.")
+            results = retrieve("maternity", [0.0] * 384, top_k=1)
+            self.assertIsInstance(results, dict)
+            chunks = results.get("chunks", [])
+            self.assertTrue(len(chunks) > 0, "Retrieval returned no results from loaded demo docs.")
+            title = chunks[0]["metadata"]["doc_title"]
+            self.assertIn("Maternity", title)
+            print(f"  ✅ Retrieval verified: Found '{title}' policy!")
         except Exception as e:
             print(f"\n[ERROR] Retrieval check failed: {e}")
             raise e
