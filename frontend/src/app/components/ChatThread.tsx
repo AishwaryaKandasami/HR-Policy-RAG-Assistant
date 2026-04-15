@@ -25,6 +25,7 @@ interface Message {
   confidence_score?: number;
   confidence_label?: string;
   query_id?: string;
+  isStreaming?: boolean;
 }
 
 interface ChatThreadProps {
@@ -47,12 +48,16 @@ export default function ChatThread({ messages, isLoading }: ChatThreadProps) {
     );
   }
 
+  // Suppress the pulsing skeleton when we already have a streaming bot message —
+  // the inline cursor inside the bubble serves the same "thinking" signal.
+  const hasStreamingMessage = messages.some(m => m.role === 'bot' && m.isStreaming);
+
   return (
     <div className="flex-1 overflow-y-auto px-6 py-8 space-y-8 no-scrollbar">
       {messages.map((msg, idx) => (
         <MessageBubble key={idx} message={msg} />
       ))}
-      {isLoading && (
+      {isLoading && !hasStreamingMessage && (
         <div className="flex gap-4 bot-bubble chat-bubble animate-pulse bg-slate-50/50">
           <div className="w-8 h-8 rounded-lg bg-slate-200 flex items-center justify-center flex-shrink-0">
             <Bot className="w-5 h-5 text-slate-400" />
@@ -100,6 +105,9 @@ function MessageBubble({ message }: { message: Message }) {
       <div className="flex-1 min-w-0">
         <div className={`whitespace-pre-wrap leading-relaxed ${isBot ? 'text-slate-700' : 'text-white'}`}>
           {message.content}
+          {message.isStreaming && (
+            <span className="inline-block w-0.5 h-4 bg-indigo-400 ml-0.5 align-middle animate-pulse" />
+          )}
         </div>
         
         {isBot && message.confidence_label && (

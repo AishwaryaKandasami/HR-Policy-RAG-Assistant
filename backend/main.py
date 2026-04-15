@@ -27,7 +27,7 @@ load_dotenv(pathlib.Path(__file__).parent.parent / ".env")
 
 from fastapi import FastAPI, File, Form, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse, JSONResponse
+from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 from pydantic import BaseModel, Field
 from typing import Optional
 
@@ -474,6 +474,164 @@ async def query_hr_bot(request: QueryRequest):
         confidence_label=confidence_label,
         latency_ms=latency,
         query_id=query_id
+    )
+
+
+@app.post("/query/stream", summary="Stream an HR policy answer via SSE")
+async def query_hr_bot_stream(request: QueryRequest):
+    """
+    Streaming variant of /query using Server-Sent Events.
+    Sends three event types:
+      {"type": "token",  "content": "<text>"}
+      {"type": "meta",   "query_id": "...", "sources": [...], "confidence_label": "...", ...}
+      {"type": "error",  "content": "<msg>"}
+    Terminated by: data: [DONE]
+
+    The judge / rewrite loop is intentionally skipped — guardrails and
+    intent classification still run synchronously before streaming begins.
+    """
+    import time
+    start_time = time.perf_counter()
+    query_id = str(uuid.uuid4())
+
+    # ── Pre-stream setup (sync, runs before first byte is sent) ────
+
+    # 1. Intent router
+    intent = classify_intent(request.query)
+
+    # 2. Guardrails (only if not already short-circuited)
+    guard = None
+    if not intent["short_circuit"]:
+        guard = classify_query(request.query)
+
+    # 3. Embed + Retrieve (only for real HR questions that passed both checks)
+    retrieved_chunks: list[dict] = []
+    confidence_score: float = 0.0
+    retrieval_error: str = ""
+
+    if not intent["short_circuit"] and guard and guard["status"] == "PASS":
+        try:
+            embed_model = get_embed_model()
+            query_vector = embed_model.encode(request.query).tolist()
+            retrieval_data = retrieve(query_text=request.query, query_vector=query_vector, top_k=3)
+            retrieved_chunks = retrieval_data["chunks"]
+            confidence_score = retrieval_data["confidence_score"]
+        except Exception as e:
+            retrieval_error = str(e)
+
+    history = [t.model_dump() for t in request.conversation_history] if request.conversation_history else []
+
+    # ── SSE generator (sync — StreamingResponse runs it in a threadpool) ─
+
+    def event_stream():
+        nonlocal start_time
+
+        def sse(payload: dict) -> str:
+            return f"data: {json.dumps(payload)}\n\n"
+
+        # ── Branch: small-talk short-circuit ──────────────────────
+        if intent["short_circuit"]:
+            yield sse({"type": "token", "content": intent["response"]})
+            yield sse({"type": "meta", "query_id": query_id, "sources": [],
+                       "confidence_label": "N/A", "confidence_score": 1.0,
+                       "llm_used": "none", "status": "PASS"})
+            yield "data: [DONE]\n\n"
+            log_interaction(query_id=query_id, query=request.query,
+                            answer=intent["response"], session_id=request.session_id,
+                            latency_ms=(time.perf_counter() - start_time) * 1000)
+            return
+
+        # ── Branch: guardrail block / escalation ──────────────────
+        if guard and guard["status"] != "PASS":
+            yield sse({"type": "token", "content": guard["message"]})
+            yield sse({"type": "meta", "query_id": query_id, "sources": [],
+                       "confidence_label": "N/A", "confidence_score": 0.0,
+                       "llm_used": "none", "status": guard["status"]})
+            yield "data: [DONE]\n\n"
+            log_interaction(query_id=query_id, query=request.query,
+                            answer=guard["message"],
+                            blocked=(guard["status"] == "BLOCK"),
+                            block_reason=guard["reason"],
+                            escalated=(guard["status"] == "ESCALATE"),
+                            session_id=request.session_id,
+                            latency_ms=(time.perf_counter() - start_time) * 1000)
+            return
+
+        # ── Branch: retrieval error ────────────────────────────────
+        if retrieval_error:
+            msg = "Sorry, I encountered an error searching the documents. Please try again."
+            yield sse({"type": "error", "content": msg})
+            yield "data: [DONE]\n\n"
+            return
+
+        # ── Branch: no chunks found ────────────────────────────────
+        if not retrieved_chunks:
+            msg = "I'm sorry, I couldn't find any documents related to your question."
+            yield sse({"type": "token", "content": msg})
+            yield sse({"type": "meta", "query_id": query_id, "sources": [],
+                       "confidence_label": "Low", "confidence_score": 0.0,
+                       "llm_used": "none", "status": "PASS"})
+            yield "data: [DONE]\n\n"
+            log_interaction(query_id=query_id, query=request.query, answer=msg,
+                            session_id=request.session_id,
+                            latency_ms=(time.perf_counter() - start_time) * 1000)
+            return
+
+        # ── Main path: stream LLM tokens ──────────────────────────
+        from generator import generate_answer_stream, MODEL_MAP as _MODEL_MAP
+        config = _MODEL_MAP.get(request.llm_provider, _MODEL_MAP["groq_llama_70b"])
+        model_used = config["id"]
+        full_answer = ""
+
+        try:
+            for token in generate_answer_stream(
+                query=request.query,
+                retrieved_chunks=retrieved_chunks,
+                model_alias=request.llm_provider,
+                api_key=request.provider_api_key or request.openai_api_key,
+                conversation_history=history,
+            ):
+                full_answer += token
+                yield sse({"type": "token", "content": token})
+        except Exception as e:
+            yield sse({"type": "error", "content": f"Generation error: {str(e)}"})
+            yield "data: [DONE]\n\n"
+            return
+
+        # ── Deduplicate sources (same logic as /query) ─────────────
+        seen_keys: set[tuple] = set()
+        unique_sources: list[dict] = []
+        for chunk in retrieved_chunks:
+            md = chunk["metadata"]
+            key = (md.get("source_filename", ""), md.get("page_number", ""),
+                   md.get("section_heading", ""))
+            if key not in seen_keys:
+                seen_keys.add(key)
+                unique_sources.append(md)
+
+        # Confidence label
+        if confidence_score > 0.7:
+            confidence_label = "High"
+        elif confidence_score >= 0.4:
+            confidence_label = "Medium"
+        else:
+            confidence_label = "Low"
+
+        latency = (time.perf_counter() - start_time) * 1000
+
+        yield sse({"type": "meta", "query_id": query_id, "sources": unique_sources,
+                   "confidence_label": confidence_label, "confidence_score": confidence_score,
+                   "llm_used": model_used, "status": "PASS", "latency_ms": latency})
+        yield "data: [DONE]\n\n"
+
+        log_interaction(query_id=query_id, query=request.query, answer=full_answer,
+                        sources=retrieved_chunks, llm_used=model_used,
+                        latency_ms=latency, session_id=request.session_id)
+
+    return StreamingResponse(
+        event_stream(),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
     )
 
 

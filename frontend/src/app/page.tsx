@@ -6,7 +6,7 @@ import Sidebar from './components/Sidebar';
 import ChatThread from './components/ChatThread';
 import DisclaimerBanner from './components/DisclaimerBanner';
 import OnboardingChecklist from './components/OnboardingChecklist';
-import { api, Doc, ConversationTurn } from '@/lib/api';
+import { api, Doc, ConversationTurn, StreamEvent } from '@/lib/api';
 
 export default function Home() {
   const [docs, setDocs] = useState<Doc[]>([]);
@@ -62,42 +62,68 @@ export default function Home() {
     const userMessage = input.trim();
     setInput("");
     setError(null);
-    setMessages(prev => [...prev, { role: 'user', content: userMessage }]);
+
+    // Build history before appending the new user message
+    const history: ConversationTurn[] = messages.map((m) => ({
+      role: m.role === "bot" ? "assistant" : "user",
+      content: m.content,
+    }));
+
+    // Add user message + empty streaming bot placeholder in one update
+    // so ChatThread never shows the skeleton (streaming cursor appears instead)
+    setMessages(prev => [
+      ...prev,
+      { role: 'user', content: userMessage },
+      { role: 'bot', content: '', isStreaming: true },
+    ]);
     setIsLoading(true);
 
     try {
-      // Build conversation history from current messages for multi-turn context.
-      // Map 'bot' role → 'assistant' to match the LLM messages format.
-      const history: ConversationTurn[] = messages.map((m) => ({
-        role: m.role === "bot" ? "assistant" : "user",
-        content: m.content,
-      }));
-
-      const res = await api.query(userMessage, provider, sessionId, history);
-
-      if (res.status === "BLOCK" || res.status === "ESCALATE") {
-        setMessages(prev => [...prev, {
-          role: 'bot',
-          content: res.answer,
-          status: res.status,
-          confidence_score: res.confidence_score,
-          confidence_label: res.confidence_label,
-          query_id: res.query_id
-        }]);
-      } else if (res.success) {
-        setMessages(prev => [...prev, {
-          role: 'bot',
-          content: res.answer,
-          sources: res.sources,
-          confidence_score: res.confidence_score,
-          confidence_label: res.confidence_label,
-          query_id: res.query_id
-        }]);
-      } else {
-        setError(res.answer || "Check backend connection and API keys.");
+      for await (const event of api.queryStream(userMessage, provider, sessionId, history)) {
+        if (event.type === "token") {
+          // Append token to the last (streaming) bot message
+          setMessages(prev => {
+            const updated = [...prev];
+            const last = updated[updated.length - 1];
+            if (last?.role === 'bot') {
+              updated[updated.length - 1] = {
+                ...last,
+                content: last.content + event.content,
+              };
+            }
+            return updated;
+          });
+        } else if (event.type === "meta") {
+          // Streaming complete — attach metadata and stop cursor
+          setMessages(prev => {
+            const updated = [...prev];
+            const last = updated[updated.length - 1];
+            if (last?.role === 'bot') {
+              updated[updated.length - 1] = {
+                ...last,
+                isStreaming: false,
+                sources: event.sources,
+                confidence_score: event.confidence_score,
+                confidence_label: event.confidence_label,
+                query_id: event.query_id,
+                status: event.status,
+              };
+            }
+            return updated;
+          });
+        } else if (event.type === "error") {
+          setError(event.content);
+          // Remove the empty streaming placeholder
+          setMessages(prev => prev.slice(0, -1));
+        }
       }
     } catch (err) {
       setError("Failed to reach the backend. Ensure the Hugging Face Space is active.");
+      // Remove streaming placeholder on network failure
+      setMessages(prev => {
+        const last = prev[prev.length - 1];
+        return last?.role === 'bot' && (last as any).isStreaming ? prev.slice(0, -1) : prev;
+      });
       console.error(err);
     } finally {
       setIsLoading(false);
