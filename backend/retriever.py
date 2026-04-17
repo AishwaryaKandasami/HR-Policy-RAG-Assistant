@@ -17,7 +17,9 @@ from typing import Optional
 from sentence_transformers import CrossEncoder
 import torch
 
-from hr_ingest import COLLECTION_NAME, get_bm25, get_qdrant
+from qdrant_client.models import FieldCondition, Filter, MatchValue
+
+from hr_ingest import COLLECTION_NAME, DEFAULT_TENANT, get_bm25, get_qdrant
 
 # ── Config ────────────────────────────────────────────────────────
 RRF_K = 60
@@ -44,11 +46,16 @@ def _rrf_score(ranks: list[int]) -> float:
     return sum(1.0 / (RRF_K + r) for r in ranks)
 
 
-def retrieve(query_text: str, query_vector: list[float], top_k: int = 3) -> dict:
+def retrieve(
+    query_text: str,
+    query_vector: list[float],
+    top_k: int = 3,
+    tenant_id: str = DEFAULT_TENANT,
+) -> dict:
     """
     Main retrieval entry point.
-    1. Search Dense (Qdrant)
-    2. Search Sparse (BM25)
+    1. Search Dense (Qdrant) — filtered by tenant_id
+    2. Search Sparse (BM25)  — post-filtered by tenant_id
     3. Fuse (RRF)
     4. Rerank (Cross-Encoder)
     """
@@ -56,40 +63,45 @@ def retrieve(query_text: str, query_vector: list[float], top_k: int = 3) -> dict
     bm25_index, bm25_corpus = get_bm25()
 
     if not bm25_corpus:
-         # store is empty
         return {"chunks": [], "confidence_score": 0.0}
 
-    # ── 1. Dense Search (top-10) ──────────────────────────────────
-    # Note: Using query_points for better compatibility with Python 3.14+
+    # ── 1. Dense Search (top-10, scoped to tenant) ────────────────
+    tenant_filter = Filter(must=[
+        FieldCondition(key="tenant_id", match=MatchValue(value=tenant_id))
+    ])
     search_result = qdrant.query_points(
         collection_name=COLLECTION_NAME,
         query=query_vector,
         limit=FUSE_TOP_K,
-        with_payload=True
+        with_payload=True,
+        query_filter=tenant_filter,
     )
     dense_results = search_result.points
-    # Map by text to avoid duplicates in fusion
     dense_map = {res.payload["chunk_text"]: (idx + 1) for idx, res in enumerate(dense_results)}
     payload_map = {res.payload["chunk_text"]: res.payload for res in dense_results}
 
-    # ── 2. Sparse Search (top-10) ──────────────────────────────────
+    # ── 2. Sparse Search (top-10, post-filtered by tenant) ────────
     sparse_map = {}
     if bm25_index:
         tokenized_query = query_text.lower().split()
         scores = bm25_index.get_scores(tokenized_query)
-        # Get indices of top scores
-        top_indices = sorted(range(len(scores)), key=lambda i: scores[i], reverse=True)[:FUSE_TOP_K]
 
-        for rank_idx, doc_idx in enumerate(top_indices):
-            # Only count if score is > 0 (bm25 often gives 0 for non-matches)
+        # Only consider corpus entries belonging to this tenant
+        tenant_indices = [
+            i for i, doc in enumerate(bm25_corpus)
+            if doc["metadata"].get("tenant_id", DEFAULT_TENANT) == tenant_id
+        ]
+        # Sort tenant-scoped indices by BM25 score
+        tenant_indices_sorted = sorted(
+            tenant_indices, key=lambda i: scores[i], reverse=True
+        )[:FUSE_TOP_K]
+
+        for rank_idx, doc_idx in enumerate(tenant_indices_sorted):
             if scores[doc_idx] > 0:
                 doc_text = bm25_corpus[doc_idx]["text"]
                 sparse_map[doc_text] = rank_idx + 1
-                # Ensure we have the payload for BM25-only matches
                 if doc_text not in payload_map:
-                    # BM25 corpus was built from chunks, lets store full metadata in it too
                     payload_map[doc_text] = bm25_corpus[doc_idx]["metadata"]
-                    # Map 'text' back to 'chunk_text' for schema consistency
                     payload_map[doc_text]["chunk_text"] = doc_text
 
     # ── 3. RRF Fusion ──────────────────────────────────────────────
