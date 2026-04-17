@@ -81,16 +81,16 @@ def get_qdrant() -> QdrantClient:
                 vectors_config=VectorParams(size=EMBED_DIMS, distance=Distance.COSINE),
             )
 
-        # 2. ALWAYS ensure Payload Index exists (Required by Qdrant Cloud for filters)
-        try:
-            _qdrant_client.create_payload_index(
-                collection_name=COLLECTION_NAME,
-                field_name="source_filename",
-                field_schema=PayloadSchemaType.KEYWORD,
-            )
-        except Exception:
-            # If index already exists or creation fails, we proceed
-            pass
+        # 2. Ensure payload indexes exist (required by Qdrant Cloud for filters)
+        for field in ("source_filename", "tenant_id"):
+            try:
+                _qdrant_client.create_payload_index(
+                    collection_name=COLLECTION_NAME,
+                    field_name=field,
+                    field_schema=PayloadSchemaType.KEYWORD,
+                )
+            except Exception:
+                pass  # index already exists — safe to ignore
     return _qdrant_client
 
 
@@ -179,21 +179,22 @@ def sync_bm25_from_cloud() -> int:
     return len(all_chunks)
 
 
-def check_doc_exists(filename: str) -> bool:
+def check_doc_exists(filename: str, tenant_id: str = "public_uk") -> bool:
     """
-    Check if any chunks for this filename already exist in Qdrant.
-    Used to skip re-ingestion of demo docs on every restart.
+    Check if any chunks for this filename + tenant already exist in Qdrant.
+    Used to skip re-ingestion of demo docs on every restart, and to detect
+    re-uploads that should trigger version replacement.
     """
     qdrant = get_qdrant()
-    # Scroll with a limit of 1 to see if at least one point exists
     res, _ = qdrant.scroll(
         collection_name=COLLECTION_NAME,
-        scroll_filter=Filter(
-            must=[FieldCondition(key="source_filename", match=MatchValue(value=filename))]
-        ),
+        scroll_filter=Filter(must=[
+            FieldCondition(key="source_filename", match=MatchValue(value=filename)),
+            FieldCondition(key="tenant_id",       match=MatchValue(value=tenant_id)),
+        ]),
         limit=1,
         with_payload=False,
-        with_vectors=False
+        with_vectors=False,
     )
     return len(res) > 0
 
@@ -274,7 +275,15 @@ def _rebuild_bm25(corpus: list[dict]) -> None:
 
 # ── Public ingestion API ───────────────────────────────────────────
 
-def ingest_file(file_path: str, api_key: str | None = None, original_filename: str | None = None) -> dict:
+DEFAULT_TENANT = "public_uk"
+
+
+def ingest_file(
+    file_path: str,
+    api_key: str | None = None,
+    original_filename: str | None = None,
+    tenant_id: str = DEFAULT_TENANT,
+) -> dict:
     """
     Full ingestion pipeline for a single file:
       1. Parse (PDF / DOCX / TXT)
@@ -298,9 +307,9 @@ def ingest_file(file_path: str, api_key: str | None = None, original_filename: s
     display_filename = original_filename if original_filename else pathlib.Path(file_path).name
     replaced = False
     chunks_replaced = 0
-    if check_doc_exists(display_filename):
-        print(f"  🔄  '{display_filename}' already exists — removing old version before re-ingesting...")
-        deletion = delete_doc(display_filename)
+    if check_doc_exists(display_filename, tenant_id=tenant_id):
+        print(f"  🔄  '{display_filename}' [{tenant_id}] already exists — removing old version...")
+        deletion = delete_doc(display_filename, tenant_id=tenant_id)
         chunks_replaced = deletion["chunks_removed"]
         replaced = True
         print(f"      Removed {chunks_replaced} old chunks. Ingesting updated version...")
@@ -324,7 +333,8 @@ def ingest_file(file_path: str, api_key: str | None = None, original_filename: s
         "doc_type":        display_type,
         "department":      "All",
         "ingested_at":     datetime.now(timezone.utc).isoformat(),
-        "source_filename": display_filename
+        "source_filename": display_filename,
+        "tenant_id":       tenant_id,
     }
 
     # 3. Chunk (Header-Aware)
@@ -365,6 +375,7 @@ def ingest_file(file_path: str, api_key: str | None = None, original_filename: s
                     "section_heading": m.get("section_heading", "General"),
                     "page_number":     m.get("page_number", 1),
                     "source_filename": display_filename,
+                    "tenant_id":       tenant_id,
                     "ingested_at":     m.get("ingested_at", ""),
                 },
             )
@@ -386,14 +397,16 @@ def ingest_file(file_path: str, api_key: str | None = None, original_filename: s
     }
 
 
-def get_ingested_docs() -> list[dict]:
+def get_ingested_docs(tenant_id: str = DEFAULT_TENANT) -> list[dict]:
     """
-    Return a list of unique documents currently in the vector store,
-    with chunk counts and ingestion timestamps.
+    Return unique documents for a given tenant, with chunk counts + timestamps.
     """
     qdrant = get_qdrant()
     results, _ = qdrant.scroll(
         collection_name=COLLECTION_NAME,
+        scroll_filter=Filter(must=[
+            FieldCondition(key="tenant_id", match=MatchValue(value=tenant_id)),
+        ]),
         limit=10_000,
         with_payload=True,
         with_vectors=False,
@@ -407,6 +420,7 @@ def get_ingested_docs() -> list[dict]:
                 "source_filename": fn,
                 "doc_title":       point.payload.get("doc_title", fn),
                 "doc_type":        point.payload.get("doc_type", "document"),
+                "tenant_id":       point.payload.get("tenant_id", tenant_id),
                 "ingested_at":     point.payload.get("ingested_at", ""),
                 "chunk_count":     0,
             }
@@ -415,21 +429,23 @@ def get_ingested_docs() -> list[dict]:
     return list(seen.values())
 
 
-def delete_doc(filename: str) -> dict:
+def delete_doc(filename: str, tenant_id: str = DEFAULT_TENANT) -> dict:
     """
-    Remove all chunks for a given filename from Qdrant and rebuild BM25.
+    Remove all chunks for a given filename + tenant from Qdrant and rebuild BM25.
 
     Returns:
       { "removed_filename": str, "chunks_removed": int }
     """
     qdrant = get_qdrant()
+    tenant_filter = Filter(must=[
+        FieldCondition(key="source_filename", match=MatchValue(value=filename)),
+        FieldCondition(key="tenant_id",       match=MatchValue(value=tenant_id)),
+    ])
 
     # Count before delete
     before, _ = qdrant.scroll(
         collection_name=COLLECTION_NAME,
-        scroll_filter=Filter(
-            must=[FieldCondition(key="source_filename", match=MatchValue(value=filename))]
-        ),
+        scroll_filter=tenant_filter,
         limit=10_000,
         with_payload=False,
         with_vectors=False,
@@ -437,17 +453,15 @@ def delete_doc(filename: str) -> dict:
     chunks_removed = len(before)
 
     # Delete from Qdrant
-    qdrant.delete(
-        collection_name=COLLECTION_NAME,
-        points_selector=Filter(
-            must=[FieldCondition(key="source_filename", match=MatchValue(value=filename))]
-        ),
-    )
+    qdrant.delete(collection_name=COLLECTION_NAME, points_selector=tenant_filter)
 
-    # Rebuild BM25 without the deleted doc
+    # Rebuild BM25 without the deleted doc (scoped to tenant)
     remaining = [
         d for d in _bm25_corpus
-        if d["metadata"].get("source_filename") != filename
+        if not (
+            d["metadata"].get("source_filename") == filename
+            and d["metadata"].get("tenant_id", DEFAULT_TENANT) == tenant_id
+        )
     ]
     _rebuild_bm25(remaining)
 

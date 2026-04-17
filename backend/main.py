@@ -61,6 +61,8 @@ class QueryRequest(BaseModel):
     conversation_history: Optional[list[ConversationTurn]] = Field(
         None, description="Prior turns in this conversation (last ~6), for multi-turn coherence"
     )
+    # Multi-tenancy: defaults to public demo tenant; set per-client when scoping to client docs
+    tenant_id: str = Field("public_uk", description="Tenant scope for retrieval isolation")
 
 
 class QueryResponse(BaseModel):
@@ -123,7 +125,11 @@ async def lifespan(app: FastAPI):
                 print(f"\n📂 Collection empty. Pre-loading {len(eligible)} demo documents...")
                 for doc_path in eligible:
                     try:
-                        result = ingest_file(str(doc_path), original_filename=doc_path.name)
+                        result = ingest_file(
+                            str(doc_path),
+                            original_filename=doc_path.name,
+                            tenant_id="public_uk",
+                        )
                         print(f"  ✅ {result['doc_title']} — {result['chunks_added']} chunks")
                     except Exception as e:
                         print(f"  ⚠  Could not pre-load {doc_path.name}: {e}")
@@ -187,6 +193,7 @@ async def ingest_documents(
     request: Request,
     files: list[UploadFile] = File(..., description="One or more policy documents (PDF, DOCX, TXT, MD)"),
     api_key: Optional[str] = Form(None, description="Optional OpenAI API key override"),
+    tenant_id: str = Form("public_uk", description="Tenant scope for this upload"),
 ):
     """
     Upload one or more HR policy documents.
@@ -220,7 +227,7 @@ async def ingest_documents(
             tmp_path = tmp.name
 
         try:
-            result = ingest_file(tmp_path, api_key=api_key, original_filename=filename)
+            result = ingest_file(tmp_path, api_key=api_key, original_filename=filename, tenant_id=tenant_id)
             results.append(result)
         except EnvironmentError as e:
             # Bad API key or missing env var — surface clearly
@@ -252,28 +259,28 @@ async def ingest_documents(
 # ── GET /docs-list ─────────────────────────────────────────────────
 
 @app.get("/docs-list", summary="List documents in the session store")
-async def list_documents():
+async def list_documents(tenant_id: str = "public_uk"):
     """
-    Return all documents currently ingested in this session's vector store,
-    with their chunk counts and ingestion timestamps.
+    Return all documents for a given tenant, with chunk counts and timestamps.
     """
-    docs = get_ingested_docs()
+    docs = get_ingested_docs(tenant_id=tenant_id)
     return JSONResponse({
-        "docs":  docs,
-        "total": len(docs),
+        "docs":      docs,
+        "total":     len(docs),
+        "tenant_id": tenant_id,
     })
 
 
 # ── DELETE /docs ───────────────────────────────────────────────────
 
 @app.delete("/docs", summary="Remove a document from the session store")
-async def remove_document(filename: str):
+async def remove_document(filename: str, tenant_id: str = "public_uk"):
     """
-    Remove all chunks for the specified filename from both
+    Remove all chunks for the specified filename + tenant from both
     the Qdrant vector store and the BM25 index.
     """
     try:
-        result = delete_doc(filename)
+        result = delete_doc(filename, tenant_id=tenant_id)
         return JSONResponse({"status": "ok", **result})
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
@@ -287,7 +294,7 @@ async def health():
     Lightweight endpoint for container health checks (Hugging Face Spaces)
     and frontend connectivity verification.
     """
-    docs = get_ingested_docs()
+    docs = get_ingested_docs(tenant_id="public_uk")
     return {
         "status":      "healthy",
         "service":     "HR Policy Q&A Bot",
@@ -385,7 +392,8 @@ async def query_hr_bot(http_request: Request, request: QueryRequest):
             retrieval_data = retrieve(
                 query_text=current_search_query,
                 query_vector=query_vector,
-                top_k=3
+                top_k=3,
+                tenant_id=request.tenant_id,
             )
             retrieved_chunks = retrieval_data["chunks"]
             confidence_score = retrieval_data["confidence_score"]
@@ -541,7 +549,12 @@ async def query_hr_bot_stream(http_request: Request, request: QueryRequest):
         try:
             embed_model = get_embed_model()
             query_vector = embed_model.encode(request.query).tolist()
-            retrieval_data = retrieve(query_text=request.query, query_vector=query_vector, top_k=3)
+            retrieval_data = retrieve(
+                query_text=request.query,
+                query_vector=query_vector,
+                top_k=3,
+                tenant_id=request.tenant_id,
+            )
             retrieved_chunks = retrieval_data["chunks"]
             confidence_score = retrieval_data["confidence_score"]
         except Exception as e:
