@@ -25,10 +25,14 @@ from dotenv import load_dotenv
 # Load .env from project root
 load_dotenv(pathlib.Path(__file__).parent.parent / ".env")
 
-from fastapi import FastAPI, File, Form, HTTPException, UploadFile
+from fastapi import FastAPI, File, Form, HTTPException, Request, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 from pydantic import BaseModel, Field
+from slowapi import Limiter, _rate_limit_exceeded_handler
+from slowapi.errors import RateLimitExceeded
+from slowapi.middleware import SlowAPIMiddleware
+from slowapi.util import get_remote_address
 from typing import Optional
 
 from audit_log import get_log_file_path, log_interaction, log_feedback
@@ -145,6 +149,21 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
+# ── Rate limiter ───────────────────────────────────────────────────
+# Uses X-Forwarded-For first (correct behind HF Spaces / Cloudflare proxy),
+# falls back to direct client IP for local dev.
+def _get_real_ip(request: Request) -> str:
+    forwarded = request.headers.get("X-Forwarded-For")
+    if forwarded:
+        return forwarded.split(",")[0].strip()
+    return request.client.host if request.client else "unknown"
+
+limiter = Limiter(key_func=_get_real_ip)
+app.state.limiter = limiter
+app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
+app.add_middleware(SlowAPIMiddleware)
+
+# ── CORS ───────────────────────────────────────────────────────────
 # ALLOWED_ORIGINS: comma-separated list set in HF Spaces → Variables & Secrets.
 # e.g. "https://your-app.vercel.app,https://your-app-git-main.vercel.app"
 # Falls back to "*" when unset (local dev only).
@@ -163,7 +182,9 @@ app.add_middleware(
 # ── POST /ingest ───────────────────────────────────────────────────
 
 @app.post("/ingest", summary="Upload and ingest HR policy documents")
+@limiter.limit("10/minute")   # file uploads are heavier; 10 per minute is ample
 async def ingest_documents(
+    request: Request,
     files: list[UploadFile] = File(..., description="One or more policy documents (PDF, DOCX, TXT, MD)"),
     api_key: Optional[str] = Form(None, description="Optional OpenAI API key override"),
 ):
@@ -278,7 +299,8 @@ async def health():
 # ── POST /query ────────────────────────────────────────────────────
 
 @app.post("/query", summary="Ask an HR policy question", response_model=QueryResponse)
-async def query_hr_bot(request: QueryRequest):
+@limiter.limit("30/minute")   # 1 question every 2 s — plenty for a real user, stops quota abuse
+async def query_hr_bot(http_request: Request, request: QueryRequest):
     """
     Full RAG pipeline with safety filters and auditing.
     """
@@ -483,7 +505,8 @@ async def query_hr_bot(request: QueryRequest):
 
 
 @app.post("/query/stream", summary="Stream an HR policy answer via SSE")
-async def query_hr_bot_stream(request: QueryRequest):
+@limiter.limit("30/minute")
+async def query_hr_bot_stream(http_request: Request, request: QueryRequest):
     """
     Streaming variant of /query using Server-Sent Events.
     Sends three event types:
