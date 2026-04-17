@@ -1,0 +1,302 @@
+[
+  {
+    "id": "AL-01",
+    "category": "Annual Leave",
+    "difficulty": "easy",
+    "question": "How many days of paid annual leave is a full-time employee entitled to per year?",
+    "expected_answer_keywords": ["28 days", "5.6 weeks"],
+    "expected_source_doc": "Annual_Leave_Guidelines.txt",
+    "pass_threshold": 0.5,
+    "notes": "Both 28 days and 5.6 weeks appear in Section 1 of the doc"
+  },
+  {
+    "id": "AL-02",
+    "category": "Annual Leave",
+    "difficulty": "easy",
+    "question": "Are bank holidays included in the annual leave entitlement?",
+    "expected_answer_keywords": ["bank holidays"],
+    "expected_source_doc": "Annual_Leave_Guidelines.txt",
+    "pass_threshold": 1.0,
+    "notes": "Section 1 states 'This includes bank holidays'"
+  },
+  {
+    "id": "AL-03",
+    "category": "Annual Leave",
+    "difficulty": "medium",
+    "question": "What is the notice period example for booking a 1-week holiday according to the annual leave guidelines?",
+    "expected_answer_keywords": ["2 weeks"],
+    "expected_source_doc": "Annual_Leave_Guidelines.txt",
+    "pass_threshold": 1.0,
+    "notes": "Section 3: 'Example: 2 weeks notice for a 1-week holiday' — unique to this doc"
+  },
+  {
+    "id": "AL-04",
+    "category": "Annual Leave",
+    "difficulty": "easy",
+    "question": "Can a manager refuse a holiday request?",
+    "expected_answer_keywords": ["refuse"],
+    "expected_source_doc": "Annual_Leave_Guidelines.txt",
+    "pass_threshold": 1.0,
+    "notes": "Section 3 states manager can refuse with proper notice"
+  },
+  {
+    "id": "AL-05",
+    "category": "Annual Leave",
+    "difficulty": "medium",
+    "question": "How much notice must an employee give to book annual leave?",
+    "expected_answer_keywords": ["twice"],
+    "expected_source_doc": "Annual_Leave_Guidelines.txt",
+    "pass_threshold": 1.0,
+    "notes": "Section 3: twice as much notice as the length of the holiday"
+  },
+  {
+    "id": "MP-01",
+    "category": "Maternity & Paternity",
+    "difficulty": "easy",
+    "question": "How many weeks of statutory maternity leave is an employee entitled to?",
+    "expected_answer_keywords": ["52 weeks"],
+    "expected_source_doc": "Maternity_Policy.txt",
+    "pass_threshold": 1.0,
+    "notes": "Section 1 of Maternity Policy"
+  },
+  {
+    "id": "MP-02",
+    "category": "Maternity & Paternity",
+    "difficulty": "easy",
+    "question": "What percentage of average weekly earnings is paid in the first 6 weeks of statutory maternity pay?",
+    "expected_answer_keywords": ["90%"],
+    "expected_source_doc": "Maternity_Policy.txt",
+    "pass_threshold": 1.0,
+    "notes": "Section 2: first 6 weeks at 90% AWE"
+  },
+  {
+    "id": "MP-03",
+    "category": "Maternity & Paternity",
+    "difficulty": "easy",
+    "question": "What is the weekly SMP rate after the first 6 weeks?",
+    "expected_answer_keywords": ["184.03"],
+    "expected_source_doc": "Maternity_Policy.txt",
+    "pass_threshold": 1.0,
+    "notes": "Section 2: £184.03 per week for remaining 33 weeks"
+  },
+  {
+    "id": "MP-04",
+    "category": "Maternity & Paternity",
+    "difficulty": "easy",
+    "question": "For how many weeks can an employee receive statutory maternity pay?",
+    "expected_answer_keywords": ["39 weeks"],
+    "expected_source_doc": "Maternity_Policy.txt",
+    "pass_threshold": 1.0,
+    "notes": "Section 2: SMP for up to 39 weeks"
+  },
+  {
+    "id": "MP-05",
+    "category": "Maternity & Paternity",
+    "difficulty": "medium",
+    "question": "How many weeks notice must an employee give before starting maternity leave?",
+    "expected_answer_keywords": ["15 weeks"],
+    "expected_source_doc": "Maternity_Policy.txt",
+    "pass_threshold": 1.0,
+    "notes": "Section 3: at least 15 weeks before expected week of childbirth"
+  },
+  {
+    "id": "SA-01",
+    "category": "Sickness Absence",
+    "difficulty": "easy",
+    "question": "What is the weekly statutory sick pay rate?",
+    "expected_answer_keywords": ["116.75"],
+    "expected_source_doc": "Sickness_Absence_Policy.txt",
+    "pass_threshold": 1.0,
+    "notes": "Section 2: SSP is £116.75 per week"
+  },
+  {
+    "id": "SA-02",
+    "category": "Sickness Absence",
+    "difficulty": "medium",
+    "question": "How many waiting days are there before SSP starts being paid?",
+    "expected_answer_keywords": ["3 days"],
+    "expected_source_doc": "Sickness_Absence_Policy.txt",
+    "pass_threshold": 1.0,
+    "notes": "Section 2: first 3 days are waiting days and unpaid"
+  },
+  {
+    "id": "SA-03",
+    "category": "Sickness Absence",
+    "difficulty": "easy",
+    "question": "For how many weeks can statutory sick pay be paid?",
+    "expected_answer_keywords": ["28 weeks"],
+    "expected_source_doc": "Sickness_Absence_Policy.txt",
+    "pass_threshold": 1.0,
+    "notes": "Section 2: SSP for up to 28 weeks"
+  },
+  {
+    "id": "SA-04",
+    "category": "Sickness Absence",
+    "difficulty": "easy",
+    "question": "How long can an employee self-certify sickness without a doctor's note?",
+    "expected_answer_keywords": ["7 days"],
+    "expected_source_doc": "Sickness_Absence_Policy.txt",
+    "pass_threshold": 1.0,
+    "notes": "Section 3: self-certify for first 7 days"
+  },
+  {
+    "id": "SA-05",
+    "category": "Sickness Absence",
+    "difficulty": "easy",
+    "question": "How much notice must an employee give their manager when calling in sick?",
+    "expected_answer_keywords": ["1 hour"],
+    "expected_source_doc": "Sickness_Absence_Policy.txt",
+    "pass_threshold": 1.0,
+    "notes": "Section 1: at least 1 hour before start time"
+  },
+  {
+    "id": "AC-01",
+    "category": "ACAS Discipline & Grievance",
+    "difficulty": "medium",
+    "question": "By how much can an employment tribunal adjust a compensatory award if an employer fails to follow the ACAS Code?",
+    "expected_answer_keywords": ["25 per cent"],
+    "expected_source_doc": "discipline-and-grievances-at-work-the-acas-guide.pdf",
+    "pass_threshold": 1.0,
+    "notes": "Introduction section: up to 25 per cent increase or decrease"
+  },
+  {
+    "id": "AC-02",
+    "category": "ACAS Discipline & Grievance",
+    "difficulty": "easy",
+    "question": "What is mediation in a workplace dispute context?",
+    "expected_answer_keywords": ["voluntary", "mediator"],
+    "expected_source_doc": "discipline-and-grievances-at-work-the-acas-guide.pdf",
+    "pass_threshold": 1.0,
+    "notes": "Mediation section: voluntary process where mediator helps"
+  },
+  {
+    "id": "AC-03",
+    "category": "ACAS Discipline & Grievance",
+    "difficulty": "medium",
+    "question": "Can an employee be dismissed for a first breach of discipline?",
+    "expected_answer_keywords": ["gross misconduct"],
+    "expected_source_doc": "discipline-and-grievances-at-work-the-acas-guide.pdf",
+    "pass_threshold": 1.0,
+    "notes": "Disciplinary procedures: no dismissal for first breach except gross misconduct"
+  },
+  {
+    "id": "AC-04",
+    "category": "ACAS Discipline & Grievance",
+    "difficulty": "easy",
+    "question": "Who can accompany a worker at a formal disciplinary hearing?",
+    "expected_answer_keywords": ["fellow worker", "trade union"],
+    "expected_source_doc": "discipline-and-grievances-at-work-the-acas-guide.pdf",
+    "pass_threshold": 0.5,
+    "notes": "Accompaniment section: fellow worker, TU rep, or TU official"
+  },
+  {
+    "id": "AC-05",
+    "category": "ACAS Discipline & Grievance",
+    "difficulty": "medium",
+    "question": "At what types of disciplinary outcomes does the right to be accompanied apply?",
+    "expected_answer_keywords": ["formal warning"],
+    "expected_source_doc": "discipline-and-grievances-at-work-the-acas-guide.pdf",
+    "pass_threshold": 1.0,
+    "notes": "Accompaniment section: formal warning, other disciplinary action, appeal confirmation"
+  },
+  {
+    "id": "AC-06",
+    "category": "ACAS Discipline & Grievance",
+    "difficulty": "hard",
+    "question": "If a worker's chosen companion is unavailable, how many working days can the hearing be postponed?",
+    "expected_answer_keywords": ["five working days"],
+    "expected_source_doc": "discipline-and-grievances-at-work-the-acas-guide.pdf",
+    "pass_threshold": 1.0,
+    "notes": "Accompaniment section: must postpone if companion unavailable, up to 5 working days"
+  },
+  {
+    "id": "AC-07",
+    "category": "ACAS Discipline & Grievance",
+    "difficulty": "medium",
+    "question": "Must an employee be paid during a period of suspension pending a disciplinary investigation?",
+    "expected_answer_keywords": ["full pay"],
+    "expected_source_doc": "discipline-and-grievances-at-work-the-acas-guide.pdf",
+    "pass_threshold": 1.0,
+    "notes": "Suspension section: must receive full pay and benefits during suspension"
+  },
+  {
+    "id": "AC-08",
+    "category": "ACAS Discipline & Grievance",
+    "difficulty": "medium",
+    "question": "Should the same person carry out the disciplinary investigation and conduct the disciplinary hearing?",
+    "expected_answer_keywords": ["different people"],
+    "expected_source_doc": "discipline-and-grievances-at-work-the-acas-guide.pdf",
+    "pass_threshold": 1.0,
+    "notes": "Establishing facts section: where practicable, different people should investigate and hear"
+  },
+  {
+    "id": "HP-01",
+    "category": "Holiday Pay Reforms 2024",
+    "difficulty": "easy",
+    "question": "When did the UK government's holiday pay and entitlement reforms come into effect?",
+    "expected_answer_keywords": ["1 January 2024"],
+    "expected_source_doc": "Holiday pay and entitlement reforms from 1 January 2024 - GOV.UK.pdf",
+    "pass_threshold": 1.0,
+    "notes": "Introduction: changes introduced on 1 January 2024"
+  },
+  {
+    "id": "HP-02",
+    "category": "Holiday Pay Reforms 2024",
+    "difficulty": "medium",
+    "question": "What accrual percentage is used to calculate holiday entitlement for irregular hours workers?",
+    "expected_answer_keywords": ["12.07%"],
+    "expected_source_doc": "Holiday pay and entitlement reforms from 1 January 2024 - GOV.UK.pdf",
+    "pass_threshold": 1.0,
+    "notes": "Section 3.1: 12.07% of actual hours worked per pay period"
+  },
+  {
+    "id": "HP-03",
+    "category": "Holiday Pay Reforms 2024",
+    "difficulty": "medium",
+    "question": "How many weeks of statutory holiday must be paid at the normal rate of pay?",
+    "expected_answer_keywords": ["4 weeks"],
+    "expected_source_doc": "Holiday pay and entitlement reforms from 1 January 2024 - GOV.UK.pdf",
+    "pass_threshold": 1.0,
+    "notes": "Section 6.1: 4 weeks at normal rate, 1.6 weeks at basic rate"
+  },
+  {
+    "id": "HP-04",
+    "category": "Holiday Pay Reforms 2024",
+    "difficulty": "medium",
+    "question": "What is rolled-up holiday pay and which workers is it available for?",
+    "expected_answer_keywords": ["12.07%", "irregular"],
+    "expected_source_doc": "Holiday pay and entitlement reforms from 1 January 2024 - GOV.UK.pdf",
+    "pass_threshold": 0.5,
+    "notes": "Section 6.2: 12.07% added to every payslip, only for irregular hours/part-year workers"
+  },
+  {
+    "id": "HP-05",
+    "category": "Holiday Pay Reforms 2024",
+    "difficulty": "easy",
+    "question": "What is the maximum number of days of annual leave that can normally be carried over to the next leave year?",
+    "expected_answer_keywords": ["8 days"],
+    "expected_source_doc": "Holiday pay and entitlement reforms from 1 January 2024 - GOV.UK.pdf",
+    "pass_threshold": 1.0,
+    "notes": "Section 5: normally carry over a maximum of 8 days with employer agreement"
+  },
+  {
+    "id": "HP-06",
+    "category": "Holiday Pay Reforms 2024",
+    "difficulty": "medium",
+    "question": "What defines an irregular hours worker under the 2024 reforms?",
+    "expected_answer_keywords": ["variable"],
+    "expected_source_doc": "Holiday pay and entitlement reforms from 1 January 2024 - GOV.UK.pdf",
+    "pass_threshold": 1.0,
+    "notes": "Section 2.1: wholly or mostly variable hours in each pay period"
+  },
+  {
+    "id": "HP-07",
+    "category": "Holiday Pay Reforms 2024",
+    "difficulty": "hard",
+    "question": "If a worker is off sick and unable to take their statutory holiday, how many days can a regular-hours worker carry over?",
+    "expected_answer_keywords": ["20 days"],
+    "expected_source_doc": "Holiday pay and entitlement reforms from 1 January 2024 - GOV.UK.pdf",
+    "pass_threshold": 1.0,
+    "notes": "Section 5: regular-hours workers can carry over up to 20 days when off sick, within 18 months"
+  }
+]
